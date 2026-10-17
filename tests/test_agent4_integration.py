@@ -28,6 +28,15 @@ def _copy(root):
     return destination
 
 
+def _fixture_groups(d):
+    members = {}
+    for incident in fileio.read_jsonl(d / config.INCIDENTS_FILE, Incident):
+        members.setdefault(incident.incident_id, set()).update(incident.report_ids)
+    groups = [dict(incident_id=iid, report_ids=sorted(ids)) for iid, ids in members.items()]
+    fileio.write_jsonl(d / "groups.jsonl", groups)
+    return groups
+
+
 def _row(idx, urgent, first="2017-08-27T10:00:00Z", snap="2017-08-27T10:30:00Z", rank=None):
     return replace(load_fixture(config.INCIDENTS_FILE, Incident)[0],
                    incident_id=f"fixture_event-inc-{idx}", urgent_proxy=urgent,
@@ -174,9 +183,10 @@ def test_ai_purity_excludes_uncertain_and_unreviewed_rows():
     with tempfile.TemporaryDirectory() as root:
         root = Path(root)
         d = _copy(root)
-        incident = load_fixture(config.INCIDENTS_FILE, Incident)[0].incident_id
+        group = max(_fixture_groups(d), key=lambda g: len(g["report_ids"]))
+        incident = group["incident_id"]
         values = [("yes", "AI"), ("no", "AI"), ("uncertain", "AI"), ("", "AI"), ("yes", "")]
-        rows = [dict(incident_id=incident, report_id=str(idx), text="fixture", same_incident=v, labeler=who)
+        rows = [dict(incident_id=incident, report_id=group["report_ids"][idx % len(group["report_ids"])], text="fixture", same_incident=v, labeler=who)
                 for idx, (v, who) in enumerate(values)]
         with patch.object(config, "LABELS_DIR", root / "labels"), patch.dict(os.environ, {"SURGEDESK_LABEL_SOURCE": "ai"}):
             config.LABELS_DIR.mkdir()
@@ -197,6 +207,35 @@ def test_ai_purity_excludes_uncertain_and_unreviewed_rows():
                 assert "invalid same_incident" in str(exc)
             else:
                 raise AssertionError("Misspelled decisions must not silently become negatives")
+
+
+def test_regrouping_invalidates_purity_and_mismatched_ui_briefings():
+    with tempfile.TemporaryDirectory() as root:
+        root = Path(root)
+        d = _copy(root)
+        groups = _fixture_groups(d)
+        group = groups[0]
+        labels = [dict(incident_id=group["incident_id"], report_id=rid, text="fixture",
+                       same_incident="yes", labeler="AI") for rid in group["report_ids"]]
+        with patch.object(config, "LABELS_DIR", root / "labels"), patch.dict(os.environ, {"SURGEDESK_LABEL_SOURCE": "ai"}):
+            config.LABELS_DIR.mkdir()
+            pd.DataFrame(labels).to_csv(config.LABELS_DIR / "ai_purity_labels_DRAFT.csv", index=False)
+            assert evaluate.eval_grouping(config.FIXTURE_EVENT, d)["purity"] == 1.0
+            all_ids = [r.report_id for r in load_fixture(config.REPORTS_FILE, Report)]
+            added = next(rid for rid in all_ids if rid not in group["report_ids"])
+            group["report_ids"].append(added)
+            fileio.write_jsonl(d / "groups.jsonl", groups)
+            result = evaluate.eval_grouping(config.FIXTURE_EVENT, d)
+            assert result["purity"] is None and result["purity_rows_stale"] == len(labels)
+        data = ui.load_demo(config.FIXTURE_EVENT, src_dir=d)
+        key, old = next(iter(data.briefings.items()))
+        incidents = fileio.read_jsonl(d / config.INCIDENTS_FILE, Incident)
+        current = next(i for i in incidents if (i.incident_id, i.snapshot_time) == key)
+        added = next(rid for rid in all_ids if rid not in current.report_ids)
+        incidents = [replace(i, report_ids=i.report_ids + [added]) if (i.incident_id, i.snapshot_time) == key else i
+                     for i in incidents]
+        fileio.write_jsonl(d / config.INCIDENTS_FILE, incidents)
+        assert key not in ui.load_demo(config.FIXTURE_EVENT, src_dir=d).briefings
 
 
 def test_ai_reference_mode_keeps_reviewed_nulls_and_stored_predictions():

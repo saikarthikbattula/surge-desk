@@ -37,6 +37,14 @@ def load_demo(event: str = config.DEMO_EVENT, stub: bool = False,
     incidents = fileio.read_jsonl(d / config.INCIDENTS_FILE, Incident)
     reports = fileio.read_jsonl(d / config.REPORTS_FILE, Report)
     briefs = fileio.read_jsonl(d / config.BRIEFINGS_FILE, Briefing) if (d / config.BRIEFINGS_FILE).exists() else []
+    incident_lookup = {(i.incident_id, i.snapshot_time): i for i in incidents}
+    try:
+        cache_key = require_module("brief").cache_key
+    except StageUnavailable:
+        cache_key = None
+    # IDs may be reused when regrouping. Never attach a cached briefing to new members.
+    briefs = [b for b in briefs if (incident := incident_lookup.get((b.incident_id, b.snapshot_time)))
+              and (stub or cache_key is None or b.cache_key == cache_key(incident, b.model_file))]
     actual = config.FIXTURE_EVENT if stub else event
     snapshots = sorted({i.snapshot_time for i in incidents})
     return DemoData(actual, snapshots,

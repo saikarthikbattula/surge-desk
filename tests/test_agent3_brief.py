@@ -4,11 +4,13 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from surgedesk import brief, config, llm, stubs, textutil
 from surgedesk.contracts import BRIEF_FIELDS, FEATURE_PLAIN, Briefing, Incident, Report, Tagged, empty_fields, zero_timing
-from surgedesk.fileio import load_embeddings, read_jsonl
+from surgedesk.fileio import load_embeddings, read_jsonl, write_jsonl
 from surgedesk.grounding import (
     check_sentence,
     evidence_ok,
@@ -176,6 +178,42 @@ def test_split_tagged_sentences():
     ]
 
 
+def test_location_quotes_need_geographic_context():
+    def location(quote, sources):
+        return ground_fields({"location": {"value": quote, "evidence": quote, "confidence": 1}}, sources)["location"]
+
+    for quote, source in (("Harvey", "Hurricane Harvey flooded Houston."),
+                          ("Harvey", "#HurricaneHarvey flooded Houston."),
+                          ("Katrina", "Harvey is worse than Katrina.")):
+        assert evidence_ok(quote, [source])  # Literal occurrence alone is insufficient.
+        assert not location(quote, [source])["grounded"]
+    assert location("Houston", ["Hurricane Harvey flooded Houston."])["grounded"]
+    assert location("Galveston County", ["Flooding in Galveston County."])["grounded"]
+    assert location("Harvey", ["Hurricane Harvey flooded Harvey, LA."])["grounded"]
+    assert location("Harvey", ["  Hurricane   Harvey flooded   Harvey, LA."])["grounded"]
+    assert location("Harvey", ["Hurricane Harvey arrived.", "Flooding in Harvey."])["grounded"]
+    with patch.object(config, "DEMO_EVENT", "hurricane_harvey_2017"):
+        assert not location("Harvey", ["#Harvey flooding."])["grounded"]
+        assert location("Harvey", ["Harvey LA has flooding."])["grounded"]
+        assert location("Harvey", ["Harvey,LA has flooding."])["grounded"]
+        assert location("Houston", ["#Houston flooding #Harvey."])["grounded"]
+
+
+def test_ranking_reason_does_not_establish_an_unmet_need():
+    sentence = "The urgency is underscored by the single report and the need for immediate rescue and donation efforts."
+    reasons = ["reports of injuries or deaths", "classifier confidence", "rescue and donation activity"]
+    fields = empty_fields()
+    assert check_sentence(sentence, ["reason"], fields, reasons, {"1"}) == (
+        False, "need claim without grounded need")
+    assert check_sentence("Ranked high because of rescue and donation activity.", ["reason"], fields, reasons, {"1"}) == (True, None)
+    assert check_sentence("Ranked high because of urgent requests for help.", ["reason"], fields,
+                          ["urgent requests for help"], set()) == (True, None)
+    fields["need"] = {"value": "need rescue", "evidence": "need rescue", "grounded": True, "confidence": 1.0}
+    assert check_sentence("People need rescue.", ["need"], fields, [], set()) == (True, None)
+    assert check_sentence("People need rescue due to rescue and donation activity.", ["reason"], fields, reasons, set()) == (
+        False, "need claim missing need tag")
+
+
 def test_check_sentence_fixture():
     _, _, incidents, briefings, _ = _fixture()
     fixture_briefing = next(row for row in briefings if row.incident_id == "fixture_event-inc-1")
@@ -278,6 +316,28 @@ def test_cache_keeps_snapshot_metadata():
         saved = read_jsonl(Path(temp_dir) / config.BRIEFINGS_FILE, Briefing)
         assert len(saved) == 2
         assert saved[0].cache_key == saved[1].cache_key
+
+
+def test_cached_unsupported_need_is_rejected_without_model_calls():
+    _, _, incidents, _, _ = _fixture()
+    incident = replace(_last_snapshot(incidents)[0],
+                       shap_top=[["share_rescue_volunteering_or_donation_effort", 1.0]])
+    fake = FakeLLM()
+    sentence = "The urgency is underscored by the single report and the need for immediate rescue and donation efforts."
+    old = Briefing(incident_id=incident.incident_id, event=incident.event, snapshot_time=incident.snapshot_time,
+                   cache_key=brief.cache_key(incident, fake.model_file), rep_report_ids=incident.report_ids[:1],
+                   fields=empty_fields(), sentences=[dict(text=sentence, tags=["reason"], accepted=True, reject_reason=None)],
+                   briefing=sentence, used_fallback=False, model_file=fake.model_file, timing=zero_timing())
+    with tempfile.TemporaryDirectory() as directory:
+        destination = Path(directory)
+        write_jsonl(destination / config.BRIEFINGS_FILE, [old])
+        result = brief.brief_incidents(incident.event, [incident], llm=fake,
+                                      src_dir=fixture_dir(), out_dir=destination)[0]
+        assert fake.json_calls == fake.text_calls == 0
+        assert result.used_fallback and not result.sentences[0]["accepted"]
+        assert result.sentences[0]["reject_reason"] == "need claim without grounded need"
+        assert result.briefing == brief.template_briefing(incident, result.fields)
+        assert read_jsonl(destination / config.BRIEFINGS_FILE, Briefing) == [result]
 
 
 def test_extract_real_granite_granite():

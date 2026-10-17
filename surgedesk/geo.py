@@ -74,8 +74,14 @@ class Gazetteer:
 class PlaceMatcher:
     def __init__(self, event: str, gazetteer: Gazetteer | None = None):
         self.states = config.states_for_event(event)
-        self.index = (gazetteer or Gazetteer()).place_index(self.states) if self.states else {}
+        self._gazetteer = (gazetteer or Gazetteer()) if self.states else None
+        self.index = self._gazetteer.place_index(self.states) if self._gazetteer else {}
+        self._state_indexes = {}
         self.qualifiers = {s.lower() for s in self.states} | {_STATE_NAMES[s] for s in self.states if s in _STATE_NAMES}
+        self._qualifier_states = {name: state for state in self.states
+                                  for name in (state.lower(), _STATE_NAMES.get(state, state.lower()))}
+        storm = re.fullmatch(r"(?:hurricane|cyclone|typhoon|tropical_storm)_(.+)_\d{4}", event)
+        self._storm_name = storm[1].replace("_", " ") if storm else None
 
     def match(self, text: str) -> tuple[list[str], str | None]:
         def expand(match):
@@ -90,11 +96,26 @@ class PlaceMatcher:
                 key = " ".join(tokens[i:i + n])
                 if key not in self.index:
                     continue
+                before = tokens[max(0, i - 2):i]
+                # A named storm is not the Gazetteer place with the same name.
+                if before and (before[-1] in {"hurricane", "cyclone", "typhoon"}
+                               or before == ["tropical", "storm"]):
+                    continue
+                state = next((self._qualifier_states[value] for width in (3, 2, 1)
+                              if (value := " ".join(tokens[i + n:i + n + width])) in self._qualifier_states), None)
+                if key == self._storm_name and state is None:
+                    continue
                 if n == 1 and key in COMMON_WORD_PLACES:
-                    following = tokens[i + 1] if i + 1 < len(tokens) else ""
-                    if following not in self.qualifiers and " ".join(tokens[i + 1:i + 3]) not in self.qualifiers:
+                    if state is None:
                         continue
-                display, fips = self.index[key]
+                index = self.index
+                if state is not None:
+                    if state not in self._state_indexes:
+                        self._state_indexes[state] = self._gazetteer.place_index([state])
+                    index = self._state_indexes[state]
+                    if key not in index:
+                        continue
+                display, fips = index[key]
                 if display not in found:
                     found.append(display)
                     counties.append(fips)

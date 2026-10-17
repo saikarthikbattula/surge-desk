@@ -71,6 +71,8 @@ For a provisional AI reference review, put `ai_extraction_labels_DRAFT.csv` and 
 
 Ranking metrics average eligible snapshots; urgency is a proxy. Time to surface is measured from first report to first top-k appearance; never-surfaced incidents remain censored. Reports, samples, evidence, and review notes displayed by Agent 4 pass through the shared privacy masker. Outputs and labels are ignored by Git.
 
+When updating place matching, back up existing outputs, labels, and the ranker before running `--stage tag --force`, `--stage ranker`, and `--stage rank --force` in that order. Embeddings and classifier weights can be reused for a place-only fix. Regrouping can reuse incident IDs with different members: the UI hides briefings with mismatched membership cache keys, and purity evaluation excludes groups whose labeled member sets no longer match, reporting `purity_rows_stale`. Review or regenerate purity sheets after regrouping. Cached briefings are rechecked against the current rejection rules without new model calls when the brief stage runs; prompt changes require `--stage brief --force` to generate new text. Use the fixed GGUF via `SURGEDESK_GRANITE` in both terminal and notebook environments. Recompute evaluation after regenerating downstream outputs; previous geographic/fairness results do not validate the changed implementation. Literal quote checks and conservative context rules do not establish full semantic correctness, and county assignment remains a nearest-centroid approximation.
+
 ## Data sources and licenses
 
 **Raw data is not redistributed.** The committed fixtures are synthetic. Models, real reports, labels, and generated runtime outputs remain outside version control.

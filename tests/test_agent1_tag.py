@@ -194,6 +194,30 @@ def test_svi_fixture():
         assert svi.get(code) is None
 
 
+def test_storm_names_are_not_places_but_qualified_towns_remain():
+    class GazetteerNames:
+        def place_index(self, states):
+            places = {"TX": {"houston": ("Houston", "48201"), "galveston": ("Galveston", "48167")},
+                      "LA": {"harvey": ("Harvey", "22071")},
+                      "FL": {"irma": ("Irma", "12001")}}
+            return {key: value for state in states for key, value in places.get(state, {}).items()}
+
+    matcher = PlaceMatcher("hurricane_harvey_2017", GazetteerNames())
+    for text in ("Hurricane Harvey flooding in Houston", "#Harvey #Houston flooding",
+                 "#HurricaneHarvey Houston flooding", "Houston flooding after Hurricane Harvey",
+                 "Hurricane Harvey TX brings flooding in Houston"):
+        assert matcher.match(text) == (["Houston"], "48201"), text
+    assert matcher.match("Harvey flooding") == ([], None)
+    assert matcher.match("#Harvey") == ([], None)
+    assert matcher.match("Harvey, LA has rising water.") == (["Harvey"], "22071")
+    assert matcher.match("Harvey Louisiana has rising water") == (["Harvey"], "22071")
+    assert matcher.match("Harvey, TX flooding") == ([], None)  # Never use the Louisiana candidate for TX.
+    assert matcher.match("Flooding in Galveston after Harvey") == (["Galveston"], "48167")
+    other = PlaceMatcher("hurricane_irma_2017", GazetteerNames())
+    assert other.match("#Irma") == ([], None)
+    assert other.match("Irma FL flooding") == (["Irma"], "12001")
+
+
 def test_svi_missing_and_tracts():
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)

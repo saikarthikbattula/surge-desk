@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import re
 
+from . import config
 from .contracts import BRIEF_FIELDS, SENTENCE_TAGS, Incident
 from .textutil import content_words, normalize_for_match
 
@@ -16,6 +17,37 @@ def evidence_ok(evidence: str | None, sources: list[str]) -> bool:
     return any(quote in normalize_for_match(source) for source in sources)
 
 
+def _geographic_use(evidence: str, sources: list[str]) -> bool:
+    """Reject quotes used only as storm names or comparison targets.
+
+    This is a conservative context guard, not a geographic entity validator.
+    A separate geographic occurrence of the same name can still support it.
+    """
+    quote = normalize_for_match(evidence)
+    event_storm = re.fullmatch(r"(?:hurricane|cyclone|typhoon|tropical_storm)_(.+)_\d{4}", config.DEMO_EVENT)
+    storm_names = {event_storm[1].replace("_", " ")} if event_storm else set()
+    for source in sources:
+        storm_names.update(name.lower() for name in re.findall(
+            r"\b(?:hurricane|cyclone|typhoon|tropical\s+storm)\s*#?([a-z]+)", source, re.I))
+    for source in sources:
+        text = normalize_for_match(source)
+        for match in re.finditer(r"(?<!\w)" + re.escape(quote) + r"(?!\w)", text):
+            prefix = text[:match.start()]
+            if re.search(r"\b(?:hurricane|cyclone|typhoon|tropical\s+storm)\s*#?$", prefix):
+                continue
+            if re.search(r"\b(?:than|compared\s+to|unlike)\s*$", prefix):
+                continue
+            if quote in storm_names:
+                geographic_prefix = re.search(r"\b(?:in|near|at|outside|city\s+of|town\s+of)\s*$", prefix)
+                # State abbreviations are explicit place qualifiers.
+                original_suffix = re.sub(r"\s+", " ", source).strip()[match.end():]
+                geographic_suffix = re.match(r"(?:\s*,\s*|\s+)[A-Z]{2}\b", original_suffix)
+                if not geographic_prefix and not geographic_suffix:
+                    continue
+            return True
+    return False
+
+
 def ground_fields(raw: dict | None, sources: list[str]) -> dict[str, dict]:
     """Keep only fields with literal quotes from the masked source texts."""
     raw = raw if isinstance(raw, dict) else {}
@@ -24,7 +56,7 @@ def ground_fields(raw: dict | None, sources: list[str]) -> dict[str, dict]:
         candidate = raw.get(name)
         candidate = candidate if isinstance(candidate, dict) else {}
         evidence = candidate.get("evidence")
-        if evidence_ok(evidence, sources):
+        if evidence_ok(evidence, sources) and (name != "location" or _geographic_use(evidence, sources)):
             confidence = candidate.get("confidence")
             if isinstance(confidence, bool):
                 confidence = 0.0
@@ -116,4 +148,12 @@ def check_sentence(sentence: str, tags: list[str], fields: dict, reasons: list[s
     for number in re.findall(r"\d+", sentence):
         if number not in numbers:
             return False, f"unsupported number '{number}'"
+    # A ranking feature about rescue/donation activity cannot establish an
+    # actual unmet need. Check the claim even if the model omits its field tag.
+    if re.search(r"\b(?:needs?|needed|requires?|required|requiring)\b", sentence, re.I):
+        need = fields.get("need", {})
+        if not need.get("grounded") or not need.get("value"):
+            return False, "need claim without grounded need"
+        if "need" not in tags:
+            return False, "need claim missing need tag"
     return True, None

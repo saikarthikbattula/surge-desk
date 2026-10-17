@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import numpy
@@ -27,7 +28,10 @@ from .textutil import mask_privacy
 EXTRACT_SYSTEM = (
     "You extract facts from disaster reports for an emergency coordinator. Use ONLY the report text. "
     "For each field, copy the shortest exact phrase from a report as evidence. If a report does not state "
-    "a field, set value and evidence to null and confidence to 0. Never guess. Return JSON only."
+    "a field, set value and evidence to null and confidence to 0. Never guess. "
+    "The quote must express that field, not merely appear in the report. Storm names and historical "
+    "comparisons are not locations. A donation offer is not an unmet need. Return JSON only: one object "
+    "with the five requested fields, without report-number wrappers, markdown, or explanations."
 )
 EXTRACT_USER = (
     "Fields:\n"
@@ -44,7 +48,12 @@ EXTRACT_USER = (
 BRIEF_SYSTEM = (
     "You write short briefings for an emergency coordinator. Use ONLY the facts given. Write 2 or 3 sentences. "
     "End every sentence with tags in square brackets naming the facts it uses, chosen from: "
-    "hazard, location, people_affected, vulnerable, need, reason. Do not add any fact that is not given."
+    "hazard, location, people_affected, vulnerable, need, reason. Do not add any fact that is not given. "
+    "Use one short factual claim per sentence and put its tags immediately after that sentence. "
+    "Omit unknown fields. Tags contain field names only, never values. "
+    "Do not infer emergencies, injuries, urgency, vulnerability, or rescue needs from ranking features. "
+    "For a ranking explanation, write 'Ranked high because of' followed by the given reason phrases "
+    "and tag it [reason]. Rescue/donation activity describes a ranking feature, not a request for aid."
 )
 BRIEF_USER = (
     "Facts:\nhazard: {hazard}\nlocation: {location}\npeople_affected: {people_affected}\n"
@@ -151,6 +160,21 @@ def _log_if_needed(llm: GraniteLLM, path: Path, kind: str, timing: dict) -> None
         append_jsonl(path, {"kind": kind, "timing": timing, "error": None})
 
 
+def _recheck_cached(row: Briefing, incident: Incident, reports_by_id: dict[str, Report]) -> Briefing:
+    """Apply current rejection checks to cached text without another model call."""
+    sources = [mask_privacy(reports_by_id[rid].text) for rid in row.rep_report_ids]
+    fields = ground_fields(row.fields, sources)
+    reasons = _positive_reasons(incident)
+    allowed = numbers_allowed(incident, fields)
+    sentences = []
+    for old in row.sentences:
+        accepted, reason = check_sentence(old["text"], old["tags"], fields, reasons, allowed)
+        sentences.append({**old, "accepted": accepted, "reject_reason": reason})
+    accepted = [sentence["text"] for sentence in sentences if sentence["accepted"]]
+    return replace(row, fields=fields, sentences=sentences, used_fallback=not accepted,
+                   briefing=" ".join(accepted) if accepted else template_briefing(incident, fields))
+
+
 def brief_incidents(event: str, incidents: list[Incident], top_n: int = config.TOP_N_BRIEF,
                     force: bool = False, llm: GraniteLLM | None = None,
                     src_dir: Path | None = None, out_dir: Path | None = None) -> list[Briefing]:
@@ -187,7 +211,13 @@ def brief_incidents(event: str, incidents: list[Incident], top_n: int = config.T
             row.cache_key == key and row.snapshot_time == incident.snapshot_time
         )), None)
         if cached is not None and not force:
-            result.append(cached)
+            if source_data is None:
+                source_data = _source_data(src_dir)
+            checked = _recheck_cached(cached, incident, source_data[0])
+            if checked != cached:
+                existing = [checked if old is cached else old for old in existing]
+                write_jsonl(output, existing)
+            result.append(checked)
             continue
 
         if source_data is None:

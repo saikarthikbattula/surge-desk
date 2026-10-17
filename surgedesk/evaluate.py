@@ -259,14 +259,16 @@ def eval_grouping(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
     purity = _label_path("grouping")
     result["purity"] = None
     result["label_provenance"] = _label_provenance()
-    result.update(purity_rows_total=0, purity_rows_evaluated=0, purity_rows_excluded=0)
+    result.update(purity_rows_total=0, purity_rows_evaluated=0, purity_rows_excluded=0,
+                  purity_rows_stale=0)
     if purity.exists():
         rows = _read_labels(purity)
         if not set(PURITY_COLUMNS).issubset(rows.columns):
             raise ValueError("purity_labels.csv: missing required columns")
         incidents_path = d / config.INCIDENTS_FILE
         if incidents_path.exists():
-            ids = {i.incident_id for i in fileio.read_jsonl(incidents_path, Incident)}
+            incidents = fileio.read_jsonl(incidents_path, Incident)
+            ids = {i.incident_id for i in incidents}
             rows = rows[rows.incident_id.isin(ids)]
             values = rows.same_incident.str.strip().str.lower()
             positive = {"y", "yes", "1", "true"}
@@ -274,9 +276,19 @@ def eval_grouping(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
             unknown = set(values) - positive - negative - {"", "uncertain", "unknown"}
             if unknown:
                 raise ValueError(f"{purity.name}: invalid same_incident values {sorted(unknown)}")
-            reviewed = rows.labeler.str.strip().ne("") & values.isin(positive | negative)
+            members = {}
+            groups_path = d / "groups.jsonl"
+            if groups_path.exists():
+                members = {g["incident_id"]: set(g["report_ids"]) for g in fileio.read_jsonl(groups_path)}
+            else:
+                for incident in incidents:
+                    members.setdefault(incident.incident_id, set()).update(incident.report_ids)
+            sampled = rows.groupby("incident_id").report_id.agg(set)
+            stale_ids = {iid for iid, reports in sampled.items() if reports != members.get(iid, set())}
+            stale = rows.incident_id.isin(stale_ids)
+            reviewed = ~stale & rows.labeler.str.strip().ne("") & values.isin(positive | negative)
             result.update(purity_rows_total=len(rows), purity_rows_evaluated=int(reviewed.sum()),
-                          purity_rows_excluded=int((~reviewed).sum()))
+                          purity_rows_excluded=int((~reviewed).sum()), purity_rows_stale=int(stale.sum()))
             if reviewed.any():
                 result["purity"] = float(values[reviewed].isin(positive).mean())
     return _save(d, "grouping_metrics.json", result)
