@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import json
 import tempfile
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import replace
@@ -108,6 +109,43 @@ def test_build_reports_cache_and_summary():
         with patch.object(data_humaid, "load_event", side_effect=AssertionError("Cache not used")):
             data_humaid.build_reports(humaid_dir=config.FIXTURES / "humaid", source="synthetic")
         assert target.read_bytes() == original
+
+
+def test_fixture_notebook_preserves_production_outputs():
+    """Running the actual fixture cells must not replace the real event registry."""
+    _require_classifier()
+    if importlib.util.find_spec("IPython") is None:
+        skip("IPython display support not installed for notebook regression check")
+    notebook = json.loads((config.ROOT / "notebooks" / "01_tag.ipynb").read_text())
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        production, stub = root / "production", root / "stub"
+        production.mkdir()
+        (production / "events.json").write_text(json.dumps([config.DEMO_EVENT, "existing_train_event"]))
+        before = {str(path.relative_to(production)): path.read_bytes()
+                  for path in production.rglob("*") if path.is_file()}
+        scope = {}
+        with patch.object(config, "OUTPUTS", production), patch.object(config, "STUB_OUTPUTS", stub), \
+             patch.object(config, "HUMAID_DIR", root / "missing-data"), \
+             patch.object(config, "MINILM_DIR", root / "missing-model"), \
+             patch("IPython.display.display"), redirect_stdout(StringIO()):
+            try:
+                # Bootstrap, setup, ingestion, embeddings, training and tagging.
+                for cell in [notebook["cells"][1], *notebook["cells"][3:8]]:
+                    source = cell["source"]
+                    source = "".join(source) if isinstance(source, list) else source
+                    exec(compile(source, "01_tag.ipynb", "exec"), scope)
+            finally:
+                if scope.get("fixture_model_dir") is not None:
+                    scope["fixture_model_dir"].cleanup()
+        after = {str(path.relative_to(production)): path.read_bytes()
+                 for path in production.rglob("*") if path.is_file()}
+        assert before == after, "Fixture walkthrough changed production outputs"
+        assert read_json(stub / "events.json") == sorted(EVENTS)
+        assert config.OUTPUTS != stub
+        for event in EVENTS:
+            assert read_jsonl(stub / event / config.REPORTS_FILE, Report)
+            assert read_jsonl(stub / event / config.TAGGED_FILE, Tagged)
 
 
 def test_place_matcher_matches_fixture():
