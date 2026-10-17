@@ -1,0 +1,18 @@
+# Laptop development only (Python 3.12 recommended, matching the VM container).
+# The VM uses IBM's preinstalled packages; never pip install on the VM.
+# Versions mirror the VM where possible; if a pin isn't available for your platform, use the nearest version.
+numpy==2.0.2
+pandas==3.0.6
+scikit-learn==1.9.0
+xgboost==3.4.1
+torch==2.11.0
+transformers==5.19.0
+tokenizers
+huggingface_hub
+joblib
+matplotlib
+ipywidgets==8.1.9
+jupyterlab
+nbconvert
+# Agent 3 laptop only (needs a C/C++ compiler; on Windows use WSL):
+llama-cpp-python==0.3.36

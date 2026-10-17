@@ -1,0 +1,17 @@
+# data, models, and run outputs never go to git (HumAID terms, size).
+# Anchored with a leading slash so fixtures/outputs/ (small synthetic test data) IS committed.
+/data/
+/models/
+/outputs/
+*.gguf
+*.tar.gz
+*.zip
+# python / jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+# secrets
+*.pem
+.env

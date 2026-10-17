@@ -1,0 +1,10 @@
+USPS	GEOID	ANSICODE	NAME	ALAND	AWATER	ALAND_SQMI	AWATER_SQMI	INTPTLAT	INTPTLONG                                                                                                               
+TX	48201	0	Harris County	1	0	1	0	29.857800	-95.393600
+TX	48157	0	Fort Bend County	1	0	1	0	29.527400	-95.770900
+TX	48007	0	Aransas County	1	0	1	0	28.105000	-96.999800
+TX	48245	0	Jefferson County	1	0	1	0	29.853600	-94.149000
+TX	48167	0	Galveston County	1	0	1	0	29.395800	-94.964500
+TX	48469	0	Victoria County	1	0	1	0	28.796300	-96.971500
+TX	48215	0	Hidalgo County	1	0	1	0	26.396500	-98.181000
+LA	22019	0	Calcasieu Parish	1	0	1	0	30.229000	-93.357500
+MS	28017	0	Chickasaw County	1	0	1	0	33.920600	-88.947900

@@ -1,0 +1,33 @@
+tweet_id	tweet_text	class_label
+902078295045046272	Flooding near Kingwood Houston, elderly couple trapped, need rescue	requests_or_urgent_needs
+902083328209846273	Kingwood Houston family stranded on roof, please send help	requests_or_urgent_needs
+902088361374646274	Need a boat in Kingwood Houston, kids trapped upstairs	requests_or_urgent_needs
+902093394539446275	Water rising in Kingwood Houston, my grandpa is stranded	requests_or_urgent_needs
+902098427704246276	SOS Kingwood Houston, people trapped in cars on the feeder road	requests_or_urgent_needs
+902099685995446277	Beaumont roads closed, bridge damage on I-10	infrastructure_and_utility_damage
+902104719160246278	Power out across Beaumont, substations flooded	infrastructure_and_utility_damage
+902109752325046279	Beaumont I-10 bridge damaged, traffic stopped	infrastructure_and_utility_damage
+902114785489846280	Major power outage in Beaumont after flooding	infrastructure_and_utility_damage
+902119818654646281	Beaumont water main broke, roads washed out	infrastructure_and_utility_damage
+902121076945846282	Shelter at Katy high school needs volunteers tonight	rescue_volunteering_or_donation_effort
+902126110110646283	Katy shelter asking for donations of water and towels	rescue_volunteering_or_donation_effort
+902131143275446284	Volunteers needed at the Katy shelter, bring cots	rescue_volunteering_or_donation_effort
+902136176440246285	Donate supplies to the Katy high school shelter	rescue_volunteering_or_donation_effort
+902141209605046286	Katy volunteers organizing a boat rescue team	rescue_volunteering_or_donation_effort
+902142467896246287	Mandatory evacuations ordered in Port Arthur	displaced_people_and_evacuations
+902147501061046288	Port Arthur residents evacuating to Beaumont shelters	displaced_people_and_evacuations
+902152534225846289	Port Arthur evacuation buses leaving downtown	displaced_people_and_evacuations
+902157567390646290	Families displaced in Port Arthur after levee overtopped	displaced_people_and_evacuations
+902159580656566291	Injured residents taken to hospital in Rockport	injured_or_dead_people
+902164613821366292	Rockport officials confirm one dead after storm	injured_or_dead_people
+902169646986166293	Several injured in Rockport when building collapsed	injured_or_dead_people
+902174680150966294	Rockport hospital treating storm injuries	injured_or_dead_people
+902176693416886295	Victoria TX boil water notice in effect	caution_and_advice
+902181726581686296	Victoria TX residents told to stay off flooded roads	caution_and_advice
+902186759746486297	Curfew tonight in Victoria TX for safety	caution_and_advice
+902191792911286298	Victoria TX warns of downed power lines	caution_and_advice
+902193806177206299	Rainfall totals now over 40 inches in places	other_relevant_information
+902198839342006300	The storm is moving slowly east tonight	other_relevant_information
+902203872506806301	National Guard units arriving to assist	other_relevant_information
+902208905671606302	FEMA says aid applications open online	other_relevant_information
+902213938836406303	Flood gauges show record river levels	other_relevant_information
