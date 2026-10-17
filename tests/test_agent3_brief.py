@@ -1,11 +1,12 @@
 """Fast, offline acceptance checks for Stage 4; Granite is opt-in only."""
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
 
-from surgedesk import brief, config, llm, stubs
+from surgedesk import brief, config, llm, stubs, textutil
 from surgedesk.contracts import BRIEF_FIELDS, FEATURE_PLAIN, Briefing, Incident, Report, Tagged, empty_fields, zero_timing
 from surgedesk.fileio import load_embeddings, read_jsonl
 from surgedesk.grounding import (
@@ -62,6 +63,60 @@ class FakeLLM:
             "seconds": 0.02, "prompt_tokens": 10, "completion_tokens": 9,
             "ok": True, "attempts": 1,
         }
+
+
+def test_chat_json_plain_without_grammar_and_quote_guard():
+    class PlainModel:
+        def __init__(self):
+            self.calls = []
+
+        def create_chat_completion(self, **kwargs):
+            assert set(kwargs) == {"messages", "max_tokens", "temperature"}
+            self.calls.append(kwargs)
+            content = (
+                "not JSON" if len(self.calls) == 1 else
+                json.dumps({"Report 1": {
+                    "hazard": "invented tsunami", "location": "Meyerland Houston",
+                }})
+            )
+            return {"choices": [{"message": {"content": content}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+
+    adapter = llm.GraniteLLM.__new__(llm.GraniteLLM)
+    adapter.model = PlainModel()
+    adapter.log_path = None
+    source = "Water rising fast near Meyerland Houston. @privatehandle needs help."
+    parsed, timing = adapter.chat_json("Use only the report", source,
+                                       brief.EXTRACTION_SCHEMA, 128)
+    assert timing["ok"] and timing["attempts"] == 2
+    assert timing["prompt_tokens"] == 20 and timing["completion_tokens"] == 10
+    assert "@privatehandle" not in adapter.model.calls[0]["messages"][1]["content"]
+    assert "@user" in adapter.model.calls[0]["messages"][1]["content"]
+    assert adapter.model.calls[1]["messages"][1]["content"].endswith("Return only valid JSON.")
+    assert parsed["location"] == {"value": "Meyerland Houston",
+                                  "evidence": "Meyerland Houston", "confidence": 0.0}
+    fields = ground_fields(parsed, [textutil.mask_privacy(source)])
+    assert fields["location"]["grounded"]
+    assert not fields["hazard"]["grounded"]
+
+
+def test_chat_json_retries_unrelated_object():
+    class PlainModel:
+        def __init__(self):
+            self.calls = 0
+
+        def create_chat_completion(self, **kwargs):
+            self.calls += 1
+            content = ({"message": "sorry"} if self.calls == 1 else
+                       {"hazard": {"value": None, "evidence": None, "confidence": 0}})
+            return {"choices": [{"message": {"content": json.dumps(content)}}]}
+
+    adapter = llm.GraniteLLM.__new__(llm.GraniteLLM)
+    adapter.model = PlainModel()
+    adapter.log_path = None
+    parsed, timing = adapter.chat_json("system", "report", brief.EXTRACTION_SCHEMA, 128)
+    assert timing["ok"] and timing["attempts"] == 2
+    assert parsed["hazard"]["value"] is None
 
 
 def test_representatives_match_fixture():

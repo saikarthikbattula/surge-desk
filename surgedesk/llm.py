@@ -35,7 +35,6 @@ class GraniteLLM:
         self.log_path = Path(log_path) if log_path is not None else None
         self.model_file = path.name
         llama_cpp = importlib.import_module("llama_cpp")
-        self._llama_cpp = llama_cpp
         start = time.perf_counter()
         self.model = llama_cpp.Llama(
             model_path=str(path),
@@ -76,9 +75,37 @@ class GraniteLLM:
                 self.log_path, {"kind": kind, "timing": timing, "error": error}
             )
 
+    @staticmethod
+    def _plain_json_fields(value: dict, schema: dict) -> dict:
+        """Adapt scalar or per-report answers; grounding still checks every quote."""
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            return value
+        reports = [item for item in value.values() if isinstance(item, dict)]
+        if not any(name in item for item in [value, *reports] for name in properties):
+            raise ValueError("JSON response had no extraction fields")
+        fields = {}
+        for name in properties:
+            candidates = [value.get(name)] + [item.get(name) for item in reports]
+            field = next((item for item in candidates if item is not None), None)
+            if isinstance(field, dict):
+                if field.get("evidence") is None and isinstance(field.get("value"), str):
+                    field = {**field, "evidence": field["value"]}
+                fields[name] = field
+            elif isinstance(field, str):
+                fields[name] = {"value": field, "evidence": field, "confidence": 0.0}
+            else:
+                fields[name] = None
+        return fields
+
     def chat_json(
         self, system: str, user: str, schema: dict, max_tokens: int
     ) -> tuple[dict | None, dict]:
+        """Parse plain chat output without native grammar, which aborts on LinuxONE.
+
+        The caller's ground_fields check still rejects quotes absent from masked
+        reports. Malformed output is retried once and otherwise returns None.
+        """
         system = textutil.mask_privacy(system)
         user = textutil.mask_privacy(user)
         timing = self._timing()
@@ -98,31 +125,19 @@ class GraniteLLM:
                     "max_tokens": max_tokens,
                     "temperature": 0.0,
                 }
-                try:
-                    timing["attempts"] += 1
-                    response = self.model.create_chat_completion(
-                        **kwargs,
-                        response_format={"type": "json_object", "schema": schema},
-                    )
-                except (TypeError, ValueError):
-                    grammar = self._llama_cpp.LlamaGrammar.from_json_schema(
-                        json.dumps(schema)
-                    )
-                    timing["attempts"] += 1
-                    response = self.model.create_chat_completion(
-                        **kwargs, grammar=grammar
-                    )
+                timing["attempts"] += 1
+                response = self.model.create_chat_completion(**kwargs)
 
                 self._add_usage(timing, response)
                 try:
                     value = json.loads(self._content(response))
                     if not isinstance(value, dict):
                         raise ValueError("JSON response was not an object")
+                    parsed = self._plain_json_fields(value, schema)
                 except (ValueError, TypeError) as exc:
                     error = f"{type(exc).__name__}: {exc}"
                     continue
 
-                parsed = value
                 timing["ok"] = True
                 error = None
                 break
