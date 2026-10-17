@@ -1,32 +1,118 @@
 # SurgeDesk
 
-Disaster report triage on IBM LinuxONE. IBM Datathon 2026, Theme 1: Real-Time AI for Critical Decisions.
+SurgeDesk turns a stream of disaster reports into a ranked list of incidents with quoted evidence a coordinator can inspect. Local models tag reports, group related messages, rank incidents, and draft grounded briefings. A human accepts, overrides, or dismisses each recommendation; SurgeDesk never dispatches help.
 
-> Starter README. Agent 4 turns this into the final judge-facing README (`handoffs/agent4_integration.md` section 9). Results live in `docs/RESULTS.md` (generated) and the write-up in `docs/REPORT.md`.
+**IBM Datathon 2026 · Theme 1: Real-Time AI for Critical Decisions.**
 
-During a hurricane, small county emergency offices get hundreds of messy, duplicate reports in a few hours. SurgeDesk turns that stream into a short, ranked list of incidents, each with quoted evidence a coordinator can verify. It recommends; a human decides.
+## Architecture
 
-## For the team: start here
-1. Read `PLAN.md` (big picture), then your own handoff in `handoffs/` (`person1` to `person4`).
-2. Start your Codex agent with: *"You are Agent N. Read AGENTS.md and handoffs/<your file>.md, then implement it."*
-3. Laptop setup (Python 3.12):
-   ```bash
-   python3.12 -m venv .venv && source .venv/bin/activate
-   pip install -r requirements-dev.txt          # llama-cpp-python only needed on the Agent 3 laptop
-   python -m surgedesk.selftest                  # must print SELFTEST PASSED
-   ```
-4. Real data on your laptop: extract Person 2's data pack at the repo root (`tar -xzf surgedesk_datapack.tar.gz`).
+| Stage | Job | Implementation owner |
+| --- | --- | --- |
+| Tag | Local MiniLM embeddings in PyTorch, a scikit-learn humanitarian category classifier, text place matching, and vulnerable-person terms | Agent 1 |
+| Group | Online similarity, place, and time grouping into incidents | Agent 2 |
+| Rank | XGBoost priority scores, native feature contributions, and an adjustable SVI weighting | Agent 2 |
+| Brief | Locally converted IBM Granite extracts quoted fields and drafts sentences; grounding checks reject unsupported output and provide a template fallback | Agent 3 |
+| Review | Historical replay, evidence cards, fairness slider, and an append-only validated human decision log | Agent 4 |
 
-## Running on LinuxONE (Person 1 only)
+Granite explains the stored ranking. Gold labels are evaluation/training targets only, and the configured demo event is excluded from training. Runtime model and data access is local; preparation scripts perform the downloads.
+
+## Running on IBM LinuxONE
+
+The supplied Dockerfile extends IBM's s390x JupyterLab container. Person 3 uses `scripts/convert_granite.sh` to convert the original IBM Granite weights ourselves into big-endian GGUF for LinuxONE, with a separate little-endian file for laptops. Model files are mounted at runtime. Agent 3 alone owns model loading, using one Granite instance per process.
+
+IBM's environment provides zDNN/NNPA libraries. Hardware capability and the presence of a library do not establish an accelerated execution path: use the environment report, Granite load logs, and `benchmark.py` outputs as evidence. Device comparisons are explicitly skipped unless Agent 1 supplies `embed.compare_devices`.
+
+**Current checkout:** Agent 4 integration is implemented against synthetic fixtures. Agents 1–3's production modules, real data, and models must be merged/provided before a full run. This checkout has no confirmed LinuxONE results. Missing stages identify their owning agent. Only Person 1 runs the pipeline on the VM.
+
+## Quick start
+
+Local fixture check, from the repository root:
+
 ```bash
-bash scripts/download_data.sh                    # VM shell: HumAID Set 1 + Census Gazetteer (+ SVI instructions)
-python scripts/download_minilm.py                # container terminal
-# Granite: converted on a laptop with scripts/convert_granite.sh, then scp'd to models/granite/
-docker build -t surgedesk:latest .               # our container on top of IBM's s390x JupyterLab image
-bash run_all.sh                                  # container terminal: every stage + evaluation
-bash run_benchmark.sh                            # container terminal, other kernels shut down
+python -m surgedesk.selftest
+bash run_all.sh --stub
 ```
-Then open `notebooks/04_demo.ipynb`. Full runbook: `handoffs/person1_vm_runner.md`.
 
-## Repository layout
-See `PLAN.md` section 6.
+Use the Python interpreter with the dependencies from `requirements-dev.txt`. Open `notebooks/04_demo.ipynb`, set `STUB = True`, then Restart Kernel and Run All. Stub scores are synthetic and must never be used as model performance claims. Nonzero fairness adjustments require Agent 2's module; lambda-zero stored cards remain available before it arrives.
+
+For deployment, Person 1 follows the complete [VM runbook](handoffs/person1_vm_runner.md). Preparation and execution commands, in their documented environments:
+
+```bash
+bash scripts/download_data.sh           # VM shell; also follow its SVI instructions
+python scripts/download_minilm.py       # container terminal
+bash scripts/convert_granite.sh          # Person 3's laptop; then transfer the big-endian model
+
+docker build -t surgedesk:latest .       # VM shell
+# Start the mounted container as described in the VM runbook.
+bash run_all.sh                         # container terminal, repo root
+bash run_benchmark.sh                   # container terminal, other kernels shut down
+```
+
+Then open `notebooks/04_demo.ipynb` with `STUB = False`. `notebooks/05_eval_benchmark.ipynb` reads saved evaluation and benchmark files and shows missing results without starting heavy work. Both notebooks begin with the frozen environment bootstrap.
+
+The CLI matches the existing runners:
+
+```bash
+python -m surgedesk.pipeline --stage data
+python -m surgedesk.pipeline --stage rank --event hurricane_harvey_2017 --force
+python -m surgedesk.pipeline --stub
+bash run_all.sh --from rank
+```
+
+Set `SURGEDESK_EVENT`, `SURGEDESK_ROOT`, `SURGEDESK_GRANITE`, and `SURGEDESK_TOP_N` as documented in `surgedesk/config.py`. `run_benchmark.sh` sets the benchmark thread count. No VM dependency installation or remote model inference is required by project code.
+
+## Results and annotation
+
+All pitch measurements must come from [`evaluate.py`](surgedesk/evaluate.py) or [`benchmark.py`](surgedesk/benchmark.py). See the generated [results](docs/RESULTS.md) and [report](docs/REPORT.md). Development results are labelled **Development run, NOT LinuxONE**; unavailable measurements remain unavailable. Do not replace these with estimated claims.
+
+After tagging, `make_label_sheet()` writes `data/labels/to_label.csv`; `make_purity_sheet()` writes `data/labels/purity_to_label.csv`. They preserve existing sheets unless explicitly forced. Humans save completed sheets as `hand_labels.csv` and `purity_labels.csv` in the same directory. Preserve `report_id` as plain text when exporting from a spreadsheet. Evaluation rejects scientific notation IDs, skips unfilled labels, and requests uncovered extraction predictions from Agent 3 when available.
+
+Ranking metrics average eligible snapshots; urgency is a proxy. Time to surface is measured from first report to first top-k appearance; never-surfaced incidents remain censored. Reports, samples, evidence, and review notes displayed by Agent 4 pass through the shared privacy masker. Outputs and labels are ignored by Git.
+
+## Data sources and licenses
+
+**Raw data is not redistributed.** The committed fixtures are synthetic. Models, real reports, labels, and generated runtime outputs remain outside version control.
+
+| Source | Attribution and terms |
+| --- | --- |
+| HumAID Set 1 | Alam, Qazi, Imran, and Ofli, *HumAID: Human-Annotated Disaster Incidents Data from Twitter*, ICWSM 2021. [Dataset](https://crisisnlp.qcri.org/humaid_dataset) and [QCRI terms](https://crisisnlp.qcri.org/terms-of-use.html): humanitarian research use, confidential contents, citation and deletion requirements. Follow the source's tweet-sharing terms. |
+| CDC/ATSDR Social Vulnerability Index | [Official data and documentation](https://www.atsdr.cdc.gov/place-health/php/svi/svi-data-documentation-download.html). US government data; retain source attribution and the downloaded release's documentation, year, and use terms. |
+| Census Gazetteer | [Official Gazetteer files](https://www.census.gov/geographies/reference-files/time-series/geo/gazetteer-files.html). US government geographic reference data; retain Census attribution and the release metadata. |
+| MiniLM | [`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2), Apache-2.0 per its model card. Used through local Transformers, with manual mean pooling. |
+| IBM Granite | [`ibm-granite/granite-3.3-2b-instruct`](https://huggingface.co/ibm-granite/granite-3.3-2b-instruct), Apache-2.0 per its model card. Conversion is performed with our preparation script; original model attribution remains applicable. |
+
+## Limitations
+
+The following list is reproduced from `PLAN.md` section 9. Its study size and hardware describe the plan; completed annotation counts and measured machine information are reported only in generated results.
+
+**Data**
+- HumAID is tweets from 2016 to 2019, not 911 calls or texts; English only.
+- HumAID is a sampled, de-duplicated research set (Harvey: ~9K tweets over 8 days), so incidents are smaller and more fragmented than a live feed would produce. The replay compresses time (1x = 12x real time).
+- Urgency is a proxy built from human humanitarian labels, not real dispatch priority or outcomes.
+- 100 hand-labeled reports from 4 labelers; no inter-rater agreement measured.
+- Only HumAID Set 1 is used.
+
+**Location**
+- Most tweets aren't geotagged; place matching from text misses reports and can confuse same-name places. Place-to-county uses the nearest county centroid, which is approximate for large cities.
+- SVI is county-level and from one year; neighborhood vulnerability is invisible.
+
+**Models**
+- Classifier and ranker are trained on other disasters; performance shifts with disaster type and region.
+- Grouping thresholds were tuned by spot check, not a labeled benchmark; wrong merges and splits happen.
+- Granite 2B is small; it misses fields and misreads slang. Its confidence values are self-reported, not calibrated.
+- Grounding proves a claim traces to a report, not that the report is true. Misinformation passes through.
+
+**Fairness**
+- Without ground truth on who most needed help, we can't prove the adjusted ranking is fairer. We show a tradeoff.
+- Social media under-represents people without phones, internet, or power.
+
+**System**
+- 3 vCPU / 8 GB VM; Granite briefings are batched for the top incidents, not real time for every report.
+- Not integrated with any dispatch system; not tested with real emergency staff; no authentication or high availability.
+
+
+## Team and roles
+
+Person 1: integration/UI/evaluation, infrastructure, and LinuxONE runner. Person 2: data and tagging. Person 3: Granite conversion and grounded briefings. Person 4: grouping/ranking and the pitch/story. Public names and final role wording are pending Person 4.
+
+Built during the IBM Datathon 2026.
