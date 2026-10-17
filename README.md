@@ -22,7 +22,7 @@ The supplied Dockerfile extends IBM's s390x JupyterLab container. Person 3 uses 
 
 IBM's environment provides zDNN/NNPA libraries. Hardware capability and the presence of a library do not establish an accelerated execution path: use the environment report, Granite load logs, and `benchmark.py` outputs as evidence. Device comparisons are explicitly skipped unless Agent 1 supplies `embed.compare_devices`.
 
-**Current checkout:** Agent 4 integration is implemented against synthetic fixtures. Agents 1–3's production modules, real data, and models must be merged/provided before a full run. This checkout has no confirmed LinuxONE results. Missing stages identify their owning agent. Only Person 1 runs the pipeline on the VM.
+**Current checkout:** Person 2's Agent 1 data/tagging code and Person 3's Agent 3 grounded briefing code are integrated with Agent 4. Agent 2's grouping, ranking, and fairness modules are still pending. The initial Agent 4 stub pipeline and review dashboard were confirmed by Person 1 on LinuxONE; the newly integrated stages still require Person 1's VM checks with the real data and local model files. Missing stages identify their owning agent. Only Person 1 runs the pipeline on the VM.
 
 ## Quick start
 
