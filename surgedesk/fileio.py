@@ -96,9 +96,9 @@ def read_json(path: Path | str):
 
 
 def save_embeddings(path: Path | str, emb: np.ndarray) -> None:
-    """Save float32 [n, 384] L2-normalized embeddings atomically."""
+    """Save embeddings atomically as big-endian float32 for LinuxONE interchange."""
     path = Path(path)
-    emb = np.asarray(emb, dtype=np.float32)
+    emb = np.asarray(emb, dtype=">f4")
     if emb.ndim != 2:
         raise ContractError(f"embeddings must be 2-D, got shape {emb.shape}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -108,7 +108,8 @@ def save_embeddings(path: Path | str, emb: np.ndarray) -> None:
 
 
 def load_embeddings(path: Path | str) -> np.ndarray:
-    emb = np.load(Path(path))
-    if emb.dtype != np.float32 or emb.ndim != 2:
+    """Read either float32 byte order; return native floats for model consumers."""
+    emb = np.load(Path(path), allow_pickle=False)
+    if emb.dtype.kind != "f" or emb.dtype.itemsize != 4 or emb.ndim != 2:
         raise ContractError(f"{path}: expected float32 2-D array, got {emb.dtype} {emb.shape}")
-    return emb
+    return np.asarray(emb, dtype=np.float32)
