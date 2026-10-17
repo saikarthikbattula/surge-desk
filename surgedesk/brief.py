@@ -235,8 +235,14 @@ def brief_incidents(event: str, incidents: list[Incident], top_n: int = config.T
                 llm = get_llm(model_path=model_path, log_path=log_path)
             fields, extract_timing = extract_fields(llm, representatives)
             _log_if_needed(llm, log_path, "json", extract_timing)
-            sentences, brief_timing = write_briefing(llm, incident, fields)
-            _log_if_needed(llm, log_path, "text", brief_timing)
+            if any(field["grounded"] for field in fields.values()):
+                sentences, brief_timing = write_briefing(llm, incident, fields)
+                _log_if_needed(llm, log_path, "text", brief_timing)
+            else:
+                # With no verified facts, another generation can only explain
+                # ranking features. Use the honest template without that call.
+                sentences = []
+                brief_timing = {"seconds": 0.0, "prompt_tokens": 0, "completion_tokens": 0}
             accepted = [sentence["text"] for sentence in sentences if sentence["accepted"]]
             fallback = not accepted
             briefing_text = " ".join(accepted) if accepted else template_briefing(incident, fields)

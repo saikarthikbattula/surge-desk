@@ -50,6 +50,8 @@ bash run_benchmark.sh                   # container terminal, other kernels shut
 
 Then open `notebooks/04_demo.ipynb` with `STUB = False`. `notebooks/05_eval_benchmark.ipynb` reads saved evaluation and benchmark files and shows missing results without starting heavy work. Both notebooks begin with the frozen environment bootstrap.
 
+Notebook 03 defaults to a short review: `SURGEDESK_TOP_N=3` unless explicitly set otherwise, `RUN_SPEED_PROBE=False`, `RUN_EXTRACTION_EVAL=False`, and cached briefings reused. It loads Granite only for an uncached call and uses the fixed BE model if present and no model override was supplied. With no grounded extraction fields, the pipeline skips sentence generation and uses the labeled template. Set `FORCE_BRIEFINGS=True` only to test new prompts deliberately. For the same smaller CLI workload use `SURGEDESK_TOP_N=3 python -m surgedesk.pipeline --stage brief`; the full CLI default in the frozen config remains unchanged. Notebook probes are development checks, not formal benchmark results. Larger incident counts and extraction-evaluation batches remain explicit choices.
+
 The CLI matches the existing runners:
 
 ```bash

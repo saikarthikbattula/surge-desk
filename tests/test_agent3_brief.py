@@ -318,6 +318,59 @@ def test_cache_keeps_snapshot_metadata():
         assert saved[0].cache_key == saved[1].cache_key
 
 
+def test_no_grounded_facts_skip_sentence_generation():
+    class NoFacts(FakeLLM):
+        def chat_json(self, *args):
+            self.json_calls += 1
+            return None, dict(seconds=0.01, prompt_tokens=10, completion_tokens=0, ok=False, attempts=1)
+
+        def chat_text(self, *args):
+            raise AssertionError("No verified facts: do not spend another generation call")
+
+    fake = NoFacts()
+    incident = _last_snapshot(_fixture()[2])[0]
+    with tempfile.TemporaryDirectory() as directory:
+        result = brief.brief_incidents(incident.event, [incident], llm=fake,
+                                      src_dir=fixture_dir(), out_dir=Path(directory))[0]
+        assert fake.json_calls == 1 and result.used_fallback
+        assert result.sentences == [] and result.timing["brief_s"] == 0.0
+        assert result.briefing == brief.template_briefing(incident, empty_fields())
+
+
+def test_notebook_fast_review_budget_and_cached_only_loading():
+    import shutil
+    from contextlib import redirect_stdout
+    from io import StringIO
+
+    notebook = json.loads((config.ROOT / "notebooks/03_brief.ipynb").read_text())
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / config.FIXTURE_EVENT
+        shutil.copytree(fixture_dir(), source)
+        labels = root / "labels"
+        labels.mkdir()
+        # A present label file must not turn Run All into an extraction batch.
+        (labels / "hand_labels.csv").write_text("report_id\n" + _fixture()[0][0].report_id + "\n")
+        model_path = root / "fake"  # Matches OfflineFakeLLM's model_file for the cache-only rerun.
+        with patch.object(config, "OUTPUTS", root), patch.object(config, "LABELS_DIR", labels), \
+             patch.object(config, "DEMO_EVENT", config.FIXTURE_EVENT), patch.object(config, "TOP_N_BRIEF", 3), \
+             patch.object(config, "GRANITE_PATH", model_path), \
+             patch.dict(os.environ, {"SURGEDESK_TOP_N": "3", "SURGEDESK_GRANITE": str(model_path)}), \
+             patch.object(brief, "extract_for_eval", side_effect=AssertionError("No automatic label batch")), \
+             patch.object(llm, "get_llm", side_effect=AssertionError("No model load for fake/cached review")):
+            for cached in (False, True):
+                if cached:
+                    model_path.write_bytes(b"placeholder; must never be loaded")
+                scope = {}
+                with patch.object(brief, "extract_fields", wraps=brief.extract_fields) as extraction, redirect_stdout(StringIO()):
+                    for cell in notebook["cells"]:
+                        if cell["cell_type"] == "code":
+                            exec(compile("".join(cell["source"]), "03_brief.ipynb", "exec"), scope)
+                assert scope["RUN_SPEED_PROBE"] is False and scope["bench_rows"] == []
+                assert len(scope["briefings"]) == 3
+                assert extraction.call_count == (0 if cached else 3)
+
+
 def test_cached_unsupported_need_is_rejected_without_model_calls():
     _, _, incidents, _, _ = _fixture()
     incident = replace(_last_snapshot(incidents)[0],
