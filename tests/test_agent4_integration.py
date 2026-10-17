@@ -247,10 +247,24 @@ def test_fairness_evaluation_uses_each_snapshot():
 def test_granite_benchmark_bypasses_briefing_cache():
     with tempfile.TemporaryDirectory() as root:
         d = _copy(root)
+        # The committed .npy fixture is little-endian. This isolated benchmark
+        # test uses fake representatives, so create its input in native byte
+        # order through the same writer used by the real embedding stage.
+        n_reports = len(fileio.read_jsonl(d / config.REPORTS_FILE, Report))
+        vectors = np.zeros((n_reports, config.EMBED_DIM),
+                           dtype=np.dtype(np.float32).newbyteorder("S"))
+        vectors[:, 0] = 1.0
+        fileio.save_embeddings(d / config.EMBEDDINGS_FILE, vectors)
         calls = []
         fake_llm = types.SimpleNamespace(load_s=1.25)
+
+        def representatives(incident, reports, tags, embeddings):
+            assert embeddings.dtype == np.dtype(np.float32)
+            assert embeddings.shape == (n_reports, config.EMBED_DIM)
+            return [reports[incident.report_ids[0]]]
+
         fake = types.SimpleNamespace(
-            select_representatives=lambda incident, reports, tags, embeddings: [reports[incident.report_ids[0]]],
+            select_representatives=representatives,
             extract_fields=lambda llm, reports: (calls.append("extract") or empty_fields(), dict(seconds=2.0, completion_tokens=10)),
             write_briefing=lambda llm, incident, fields: (calls.append("brief") or [], dict(seconds=3.0, completion_tokens=20)))
         modules = {"brief": fake, "llm": types.SimpleNamespace(get_llm=lambda **kwargs: fake_llm)}
