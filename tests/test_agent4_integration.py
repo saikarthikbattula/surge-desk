@@ -170,6 +170,73 @@ def test_extraction_metrics_with_labels():
         assert result["json_valid_rate"] == 1.0 and result["mean_seconds_per_report"] == 2.0
 
 
+def test_ai_purity_excludes_uncertain_and_unreviewed_rows():
+    with tempfile.TemporaryDirectory() as root:
+        root = Path(root)
+        d = _copy(root)
+        incident = load_fixture(config.INCIDENTS_FILE, Incident)[0].incident_id
+        values = [("yes", "AI"), ("no", "AI"), ("uncertain", "AI"), ("", "AI"), ("yes", "")]
+        rows = [dict(incident_id=incident, report_id=str(idx), text="fixture", same_incident=v, labeler=who)
+                for idx, (v, who) in enumerate(values)]
+        with patch.object(config, "LABELS_DIR", root / "labels"), patch.dict(os.environ, {"SURGEDESK_LABEL_SOURCE": "ai"}):
+            config.LABELS_DIR.mkdir()
+            path = config.LABELS_DIR / "ai_purity_labels_DRAFT.csv"
+            pd.DataFrame(rows).to_csv(path, index=False)
+            result = evaluate.eval_grouping(config.FIXTURE_EVENT, d)
+            assert result["purity"] == 0.5
+            assert result["purity_rows_total"] == 5
+            assert result["purity_rows_evaluated"] == 2 and result["purity_rows_excluded"] == 3
+            assert result["label_provenance"]["source"] == "ai"
+            pd.DataFrame(rows[2:4]).to_csv(path, index=False)
+            assert evaluate.eval_grouping(config.FIXTURE_EVENT, d)["purity"] is None
+            rows[0]["same_incident"] = "yees"
+            pd.DataFrame(rows).to_csv(path, index=False)
+            try:
+                evaluate.eval_grouping(config.FIXTURE_EVENT, d)
+            except ValueError as exc:
+                assert "invalid same_incident" in str(exc)
+            else:
+                raise AssertionError("Misspelled decisions must not silently become negatives")
+
+
+def test_ai_reference_mode_keeps_reviewed_nulls_and_stored_predictions():
+    with tempfile.TemporaryDirectory() as root:
+        root = Path(root)
+        d = _copy(root)
+        rid = load_fixture(config.REPORTS_FILE, Report)[0].report_id
+        row = dict.fromkeys(evaluate.HAND_LABEL_COLUMNS, "")
+        row.update(report_id=rid, labeler="AI")
+        with patch.object(config, "LABELS_DIR", root / "labels"), patch.dict(os.environ, {"SURGEDESK_LABEL_SOURCE": "ai"}):
+            config.LABELS_DIR.mkdir()
+            pd.DataFrame([row]).to_csv(config.LABELS_DIR / "ai_extraction_labels_DRAFT.csv", index=False)
+            assert len(evaluate._hand_labels()) == 1
+            fileio.write_jsonl(d / "extraction_preds.jsonl", [dict(report_id=rid, fields=empty_fields(), timing=dict(ok=True, seconds=1.0))])
+            result = evaluate.eval_extraction(config.FIXTURE_EVENT, d)
+            assert result["n_labeled"] == 1 and result["hazard"]["match_rate"] == 1.0
+            assert result["label_provenance"]["provisional"]
+        with patch.object(config, "LABELS_DIR", root / "labels"), patch.dict(os.environ, {"SURGEDESK_LABEL_SOURCE": "human"}):
+            assert evaluate._hand_labels() is None  # Never silently reuse AI drafts in human mode.
+
+
+def test_ai_run_all_can_disable_granite_and_reports_provenance():
+    with tempfile.TemporaryDirectory() as root:
+        root = Path(root)
+        d = _copy(root)
+        rid = load_fixture(config.REPORTS_FILE, Report)[0].report_id
+        row = dict.fromkeys(evaluate.HAND_LABEL_COLUMNS, "")
+        row.update(report_id=rid, location="Meyerland Houston", labeler="AI")
+        with patch.object(config, "LABELS_DIR", root / "labels"), patch.object(config, "DOCS", root / "docs"), \
+             patch.dict(os.environ, {"SURGEDESK_LABEL_SOURCE": "ai", "SURGEDESK_GENERATE_EXTRACTIONS": "0"}), \
+             patch("surgedesk.brief.extract_for_eval", side_effect=AssertionError("Granite must not be called")):
+            config.LABELS_DIR.mkdir()
+            pd.DataFrame([row]).to_csv(config.LABELS_DIR / "ai_extraction_labels_DRAFT.csv", index=False)
+            result = evaluate.run_all(config.FIXTURE_EVENT, d)
+            assert result["extraction"]["status"] == "skipped"
+            provenance = fileio.read_json(d / "label_provenance.json")
+            assert provenance["source"] == "ai" and not provenance["generate_missing_extractions"]
+            assert "PROVISIONAL AI-BASED EVALUATION" in (config.DOCS / "RESULTS.md").read_text()
+
+
 def test_upstream_missing_has_owner():
     with patch.dict(sys.modules, {"surgedesk.fairness": None}):
         try:

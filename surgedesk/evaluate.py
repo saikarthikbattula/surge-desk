@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,16 +76,56 @@ def _read_labels(path):
     return frame
 
 
+def _label_mode():
+    mode = os.environ.get("SURGEDESK_LABEL_SOURCE", "human").strip().lower()
+    if mode not in {"human", "ai"}:
+        raise ValueError("SURGEDESK_LABEL_SOURCE must be human or ai")
+    return mode
+
+
+def _label_path(kind):
+    names = {"human": {"extraction": "hand_labels.csv", "grouping": "purity_labels.csv"},
+             "ai": {"extraction": "ai_extraction_labels_DRAFT.csv", "grouping": "ai_purity_labels_DRAFT.csv"}}
+    return config.LABELS_DIR / names[_label_mode()][kind]
+
+
+def _label_provenance():
+    source = _label_mode()
+    # Preserve AI provenance even if a draft was renamed as a human-label file.
+    reviewers = []
+    for kind in ("extraction", "grouping"):
+        path = _label_path(kind)
+        if path.exists():
+            frame = _read_labels(path)
+            if "labeler" in frame:
+                reviewers.extend(frame.labeler.str.strip().loc[frame.labeler.str.strip().ne("")])
+    if source == "human" and any(re.match(r"^AI(?:$|[ _-])", name, re.I) for name in reviewers):
+        source = "ai_assisted"
+    return {"source": source, "provisional": source != "human",
+            "extraction_file": _label_path("extraction").name,
+            "grouping_file": _label_path("grouping").name,
+            "note": ("AI reference labels; not independent human ground truth. Uncertain grouping rows are excluded."
+                     if source != "human" else "Human reference labels; unreviewed or uncertain grouping rows are excluded.")}
+
+
+def _generate_extractions():
+    value = os.environ.get("SURGEDESK_GENERATE_EXTRACTIONS", "1").strip().lower()
+    if value not in {"0", "1"}:
+        raise ValueError("SURGEDESK_GENERATE_EXTRACTIONS must be 0 or 1")
+    return value == "1"
+
+
 def _hand_labels():
-    path = config.LABELS_DIR / "hand_labels.csv"
+    path = _label_path("extraction")
     if not path.exists():
         return None
     labels = _read_labels(path)
     missing = set(HAND_LABEL_COLUMNS) - set(labels.columns)
     if missing:
         raise ValueError(f"{path}: missing columns {sorted(missing)}")
-    keep = labels.labeler.str.strip().ne("") & labels[BRIEF_FIELDS].apply(
-        lambda row: any(str(v).strip() for v in row), axis=1)
+    keep = labels.labeler.str.strip().ne("")
+    if _label_mode() != "ai":
+        keep &= labels[BRIEF_FIELDS].apply(lambda row: any(str(v).strip() for v in row), axis=1)
     labels = labels.loc[keep].copy()
     if labels.report_id.duplicated().any():
         raise ValueError(f"{path}: duplicate report_id labels")
@@ -178,7 +219,9 @@ def eval_extraction(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dic
     labels = _hand_labels()
     path = d / "extraction_preds.jsonl"
     if labels is None or labels.empty or not path.exists():
-        return _save(d, "extraction_metrics.json", _skipped("Awaiting hand labels and extraction_preds.jsonl (owner: Agent 3)"))
+        result = _skipped(f"Awaiting {_label_path('extraction').name} and extraction_preds.jsonl (owner: Agent 3)")
+        result["label_provenance"] = _label_provenance()
+        return _save(d, "extraction_metrics.json", result)
     reports_path = d / config.REPORTS_FILE
     if not reports_path.exists():
         return _save(d, "extraction_metrics.json", _skipped("reports.jsonl not available yet (owner: Agent 1)"))
@@ -204,7 +247,7 @@ def eval_extraction(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dic
         }
     result.update(json_valid_rate=sum(bool(p["timing"].get("ok", False)) for _, p in matched) / len(matched),
                   mean_seconds_per_report=float(np.mean([p["timing"]["seconds"] for _, p in matched])),
-                  n_labeled=len(matched))
+                  n_labeled=len(matched), label_provenance=_label_provenance())
     pd.DataFrame([dict(field=f, **result[f]) for f in BRIEF_FIELDS]).to_csv(d / "extraction_metrics.csv", index=False)
     return _save(d, "extraction_metrics.json", result)
 
@@ -213,8 +256,10 @@ def eval_grouping(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
     d = _dir(event, src_dir)
     path = d / "group_stats.json"
     result = fileio.read_json(path) if path.exists() else _skipped("group_stats.json not available yet (owner: Agent 2)")
-    purity = config.LABELS_DIR / "purity_labels.csv"
+    purity = _label_path("grouping")
     result["purity"] = None
+    result["label_provenance"] = _label_provenance()
+    result.update(purity_rows_total=0, purity_rows_evaluated=0, purity_rows_excluded=0)
     if purity.exists():
         rows = _read_labels(purity)
         if not set(PURITY_COLUMNS).issubset(rows.columns):
@@ -224,8 +269,16 @@ def eval_grouping(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
             ids = {i.incident_id for i in fileio.read_jsonl(incidents_path, Incident)}
             rows = rows[rows.incident_id.isin(ids)]
             values = rows.same_incident.str.strip().str.lower()
-            if len(values):
-                result["purity"] = float(values.isin({"y", "yes", "1", "true"}).mean())
+            positive = {"y", "yes", "1", "true"}
+            negative = {"n", "no", "0", "false"}
+            unknown = set(values) - positive - negative - {"", "uncertain", "unknown"}
+            if unknown:
+                raise ValueError(f"{purity.name}: invalid same_incident values {sorted(unknown)}")
+            reviewed = rows.labeler.str.strip().ne("") & values.isin(positive | negative)
+            result.update(purity_rows_total=len(rows), purity_rows_evaluated=int(reviewed.sum()),
+                          purity_rows_excluded=int((~reviewed).sum()))
+            if reviewed.any():
+                result["purity"] = float(values[reviewed].isin(positive).mean())
     return _save(d, "grouping_metrics.json", result)
 
 
@@ -392,6 +445,11 @@ def _results(summary, sections, info):
         caption = f"**{caption}**"
     text = f"{caption}, {to_iso(datetime.now(timezone.utc))}\n\n# SurgeDesk measured results\n\n"
     text += "Generated by `surgedesk.evaluate`; fixtures and stub outputs are development evidence only.\n\n"
+    provenance = sections["grouping"].get("label_provenance", _label_provenance())
+    text += "## Reference-label provenance\n\n" + _markdown_table([provenance])
+    if provenance["provisional"]:
+        text += "\n**PROVISIONAL AI-BASED EVALUATION: extraction agreement and grouping purity use AI reference labels, not independent human ground truth. Human validation is pending.**\n\n"
+    text += "Classifier metrics use the dataset's gold labels. Ranking/fairness metrics use urgent_proxy, not AI extraction labels or dispatch outcomes.\n\n"
     text += _markdown_table([dict(event=summary["event"], **summary["measured_on"])])
     for title, keys in (("Data and grouping", ["n_reports", "n_actionable", "n_incidents", "singleton_share", "purity"]),
                         ("Classifier and ranker", ["classifier_macro_f1", "ranker_dev_auc"])):
@@ -409,7 +467,7 @@ def _results(summary, sections, info):
     else:
         text += _markdown_table([dict(field=f, **extraction[f]) for f in BRIEF_FIELDS])
         text += _markdown_table([{k: v for k, v in extraction.items() if k not in BRIEF_FIELDS}])
-    text += "\nGrounded rate is conditional on a non-null prediction; null agreement is conditional on a null hand label. Empty denominators are unavailable.\n"
+    text += "\nGrounded rate is conditional on a non-null prediction; null agreement is conditional on a null reference label. Empty denominators are unavailable.\n"
     text += "\n## Briefings\n\n" + _markdown_table([summary["briefings"]])
     text += "\n## Availability\n\n" + _markdown_table([dict(evaluation=k, **v) for k, v in sections.items() if v.get("status") == "skipped"])
     fileio._atomic_write_text(config.DOCS / "RESULTS.md", text)
@@ -425,7 +483,7 @@ def run_all(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
             pass
     labels = _hand_labels()
     extraction_error = None
-    if labels is not None and not labels.empty and (d / config.REPORTS_FILE).exists():
+    if _generate_extractions() and labels is not None and not labels.empty and (d / config.REPORTS_FILE).exists():
         report_ids = {r.report_id for r in fileio.read_jsonl(d / config.REPORTS_FILE, Report)}
         ids = [rid for rid in labels.report_id if rid in report_ids]
         pred_path = d / "extraction_preds.jsonl"
@@ -440,6 +498,9 @@ def run_all(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
                 "fairness": eval_fairness(event, d)}
     if extraction_error:
         sections["extraction"] = _save(d, "extraction_metrics.json", extraction_error)
+    provenance = _label_provenance()
+    provenance["generate_missing_extractions"] = _generate_extractions()
+    _save(d, "label_provenance.json", provenance)
     reports = fileio.read_jsonl(d / config.REPORTS_FILE, Report) if (d / config.REPORTS_FILE).exists() else None
     tags = fileio.read_jsonl(d / config.TAGGED_FILE, Tagged) if (d / config.TAGGED_FILE).exists() else None
     incidents = fileio.read_jsonl(d / config.INCIDENTS_FILE, Incident) if (d / config.INCIDENTS_FILE).exists() else None
