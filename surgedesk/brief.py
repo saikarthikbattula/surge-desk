@@ -169,8 +169,9 @@ def _recheck_cached(row: Briefing, incident: Incident, reports_by_id: dict[str, 
     allowed = numbers_allowed(incident, fields)
     sentences = []
     for old in row.sentences:
-        accepted, reason = check_sentence(old["text"], old["tags"], fields, reasons, allowed)
-        sentences.append({**old, "text": _clean_sentence(old["text"]),
+        sentence = _clean_sentence(mask_privacy(old["text"]))
+        accepted, reason = check_sentence(sentence, old["tags"], fields, reasons, allowed)
+        sentences.append({**old, "text": sentence,
                           "accepted": accepted, "reject_reason": reason})
     accepted = [sentence["text"] for sentence in sentences if sentence["accepted"]]
     return replace(row, fields=fields, sentences=sentences, used_fallback=not accepted,

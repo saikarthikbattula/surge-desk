@@ -102,6 +102,34 @@ def test_chat_json_plain_without_grammar_and_quote_guard():
     assert not fields["hazard"]["grounded"]
 
 
+def test_phone_number_is_masked_before_extraction_and_briefing_fake_calls():
+    phone = "713-555-0100"
+    source = f"Please send a ventilator to Pine Clinic. Call {phone} for supplies."
+    report = replace(_fixture()[0][0], text=source)
+    incident = _last_snapshot(_fixture()[2])[0]
+
+    class PrivateFake:
+        def chat_json(self, system, user, schema, max_tokens):
+            assert phone not in system + user
+            assert "<phone>" in user
+            return {"need": {"value": "Please send a ventilator",
+                             "evidence": "Please send a ventilator", "confidence": 1}}, {}
+
+        def chat_text(self, system, user, max_tokens):
+            assert phone not in system + user
+            assert "<phone>" in user
+            return "Reports state: Please send a ventilator. [need]", {}
+
+    fake = PrivateFake()
+    fields, _ = brief.extract_fields(fake, [report])
+    assert fields["need"]["grounded"]
+    # Check the briefing boundary too, including a manually supplied old quote.
+    fields["need"] = {"value": f"Please send a ventilator; call {phone}",
+                      "evidence": f"Please send a ventilator; call {phone}",
+                      "confidence": 1.0, "grounded": True}
+    brief.write_briefing(fake, incident, fields)
+
+
 def test_chat_json_retries_unrelated_object():
     class PlainModel:
         def __init__(self):
@@ -255,6 +283,49 @@ def test_cached_historical_fields_are_removed_without_generation():
         assert reviewed[0].sentences[0]["text"] == "Reports state 8,000 people."
         assert brief.review_cached_briefings([row], [replace(incident, report_ids=incident.report_ids[1:])],
                                              [representative]) == []
+
+
+def test_cache_recheck_masks_old_phone_sentence_and_invalidates_old_evidence():
+    import shutil
+
+    reports, _, incidents, _, _ = _fixture()
+    incident = _last_snapshot(incidents)[0]
+    representative = incident.report_ids[0]
+    phone = "713-555-0100"
+    quote = f"Call {phone} for supplies"
+    old_fields = empty_fields()
+    old_fields["need"] = {"value": quote, "evidence": quote,
+                          "confidence": 1.0, "grounded": True}
+    sentence = f"Reports state: {quote}."
+    old = Briefing(incident_id=incident.incident_id, event=incident.event,
+                   snapshot_time=incident.snapshot_time,
+                   cache_key=brief.cache_key(incident, "fake"),
+                   rep_report_ids=[representative], fields=old_fields,
+                   sentences=[{"text": sentence, "tags": ["need"],
+                               "accepted": True, "reject_reason": None}],
+                   briefing=sentence, used_fallback=False,
+                   model_file="fake", timing=zero_timing())
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source_dir = root / "source"
+        output_dir = root / "output"
+        shutil.copytree(fixture_dir(), source_dir)
+        changed = [replace(report, text=quote + ".") if report.report_id == representative else report
+                   for report in reports]
+        write_jsonl(source_dir / config.REPORTS_FILE, changed)
+        output_dir.mkdir()
+        write_jsonl(output_dir / config.BRIEFINGS_FILE, [old])
+        fake = FakeLLM()
+        result = brief.brief_incidents(incident.event, [incident], top_n=1, llm=fake,
+                                      src_dir=source_dir, out_dir=output_dir)[0]
+        assert fake.json_calls == fake.text_calls == 0
+        assert not result.fields["need"]["grounded"]
+        assert result.fields["need"]["evidence"] is None
+        assert result.used_fallback
+        assert result.sentences[0]["text"] == "Reports state: Call <phone> for supplies."
+        assert not result.sentences[0]["accepted"]
+        saved_text = (output_dir / config.BRIEFINGS_FILE).read_text()
+        assert phone not in saved_text
 
 
 def test_ranking_reason_does_not_establish_an_unmet_need():
@@ -435,9 +506,9 @@ def test_notebook_fast_review_budget_and_cached_only_loading():
         (labels / "hand_labels.csv").write_text("report_id\n" + _fixture()[0][0].report_id + "\n")
         model_path = root / "fake"  # Matches OfflineFakeLLM's model_file for the cache-only rerun.
         with patch.object(config, "OUTPUTS", root), patch.object(config, "LABELS_DIR", labels), \
-             patch.object(config, "DEMO_EVENT", config.FIXTURE_EVENT), patch.object(config, "TOP_N_BRIEF", 3), \
+             patch.object(config, "DEMO_EVENT", config.FIXTURE_EVENT), patch.object(config, "TOP_N_BRIEF", 10), \
              patch.object(config, "GRANITE_PATH", model_path), \
-             patch.dict(os.environ, {"SURGEDESK_TOP_N": "3", "SURGEDESK_GRANITE": str(model_path)}), \
+             patch.dict(os.environ, {"SURGEDESK_TOP_N": "10", "SURGEDESK_GRANITE": str(model_path)}), \
              patch.object(brief, "extract_for_eval", side_effect=AssertionError("No automatic label batch")), \
              patch.object(llm, "get_llm", side_effect=AssertionError("No model load for fake/cached review")):
             for cached in (False, True):
@@ -449,6 +520,7 @@ def test_notebook_fast_review_budget_and_cached_only_loading():
                         if cell["cell_type"] == "code":
                             exec(compile("".join(cell["source"]), "03_brief.ipynb", "exec"), scope)
                 assert scope["RUN_SPEED_PROBE"] is False and scope["bench_rows"] == []
+                assert scope["RUN_EXTRACTION_EVAL"] is False
                 assert len(scope["briefings"]) == 3
                 assert extraction.call_count == (0 if cached else 3)
                 assert len(scope["new_calls"]) == (0 if cached else 3)
