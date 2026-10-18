@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from surgedesk import benchmark, config, evaluate, fileio, ui
-from surgedesk.contracts import BRIEF_FIELDS, Decision, Incident, Report, empty_fields
+from surgedesk.contracts import BRIEF_FIELDS, Briefing, Decision, Incident, Report, empty_fields
 from surgedesk.pipeline import StageUnavailable
 from surgedesk.testing import fixture_dir, load_fixture
 
@@ -236,6 +236,36 @@ def test_regrouping_invalidates_purity_and_mismatched_ui_briefings():
                      for i in incidents]
         fileio.write_jsonl(d / config.INCIDENTS_FILE, incidents)
         assert key not in ui.load_demo(config.FIXTURE_EVENT, src_dir=d).briefings
+        with patch.object(config, "LABELS_DIR", root / "absent_labels"), patch.object(config, "DOCS", root / "docs"):
+            assert evaluate.run_all(config.FIXTURE_EVENT, d)["briefings"]["n"] == 2
+
+
+def test_ui_and_evaluation_recheck_historical_cached_claims_without_loading():
+    with tempfile.TemporaryDirectory() as root:
+        root = Path(root)
+        d = _copy(root)
+        rows = fileio.read_jsonl(d / config.BRIEFINGS_FILE, Briefing)
+        old = rows[0]
+        rep_id = old.rep_report_ids[0]
+        reports = fileio.read_jsonl(d / config.REPORTS_FILE, Report)
+        reports = [replace(r, text="In 1900, Harbor City reported 8,000 dead.") if r.report_id == rep_id else r
+                   for r in reports]
+        fileio.write_jsonl(d / config.REPORTS_FILE, reports)
+        fields = empty_fields()
+        fields["people_affected"] = dict(value="8,000", evidence="8,000", confidence=1, grounded=True)
+        claim = dict(text="1. Reports state 8,000 people,.", tags=["people_affected"], accepted=True, reject_reason=None)
+        old = replace(old, fields=fields, sentences=[claim], rep_report_ids=[rep_id],
+                      briefing=claim["text"], used_fallback=False)
+        fileio.write_jsonl(d / config.BRIEFINGS_FILE, [old])
+        from surgedesk import brief
+        with patch.object(config, "DEMO_EVENT", "hurricane_harvey_2017"), \
+             patch.object(config, "LABELS_DIR", root / "labels"), patch.object(config, "DOCS", root / "docs"), \
+             patch.object(brief, "get_llm", side_effect=AssertionError("Cached review must not load Granite")):
+            displayed = ui.load_demo(config.FIXTURE_EVENT, src_dir=d).briefings[(old.incident_id, old.snapshot_time)]
+            assert displayed.used_fallback and not displayed.fields["people_affected"]["grounded"]
+            summary = evaluate.run_all(config.FIXTURE_EVENT, d)
+            assert summary["briefings"] == dict(n=1, fields_grounded_share=0.0,
+                                                 sentences_accepted_share=0.0, fallback_share=1.0)
 
 
 def test_ai_reference_mode_keeps_reviewed_nulls_and_stored_predictions():

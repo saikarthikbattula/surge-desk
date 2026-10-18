@@ -52,6 +52,8 @@ Then open `notebooks/04_demo.ipynb` with `STUB = False`. `notebooks/05_eval_benc
 
 Notebook 03 defaults to a short review: `SURGEDESK_TOP_N=3` unless explicitly set otherwise, `RUN_SPEED_PROBE=False`, `RUN_EXTRACTION_EVAL=False`, and cached briefings reused. It loads Granite only for an uncached call and uses the fixed BE model if present and no model override was supplied. With no grounded extraction fields, the pipeline skips sentence generation and uses the labeled template. Set `FORCE_BRIEFINGS=True` only to test new prompts deliberately. For the same smaller CLI workload use `SURGEDESK_TOP_N=3 python -m surgedesk.pipeline --stage brief`; the full CLI default in the frozen config remains unchanged. Notebook probes are development checks, not formal benchmark results. Larger incident counts and extraction-evaluation batches remain explicit choices.
 
+Cached review, dashboard display, and evaluation apply the current evidence checks without model calls. Historical references (relative to the configured demo event year), speculative counts, and unspecified rising tolls cannot establish a current affected-person count. A quoted responder or family reference may still identify who was affected. Locations remain unknown when the reports do not establish a current place; the event name is not a location substitute. List numbering is removed before sentence checking, and comma-separated counts are checked as complete numbers. These rules are conservative filters, not independent verification of the reports. After updating these checks, run notebook 03 with `FORCE_BRIEFINGS=False` to review saved results first; only regenerate deliberately to test the new prompts.
+
 The CLI matches the existing runners:
 
 ```bash

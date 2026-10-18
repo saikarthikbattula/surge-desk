@@ -20,7 +20,7 @@ from .contracts import (
     zero_timing,
 )
 from .fileio import append_jsonl, load_embeddings, read_jsonl, write_jsonl
-from .grounding import check_sentence, ground_fields, numbers_allowed, split_tagged_sentences
+from .grounding import _clean_sentence, check_sentence, ground_fields, numbers_allowed, split_tagged_sentences
 from .llm import GraniteLLM, get_llm
 from .textutil import mask_privacy
 
@@ -30,14 +30,15 @@ EXTRACT_SYSTEM = (
     "For each field, copy the shortest exact phrase from a report as evidence. If a report does not state "
     "a field, set value and evidence to null and confidence to 0. Never guess. "
     "The quote must express that field, not merely appear in the report. Storm names and historical "
-    "comparisons are not locations. A donation offer is not an unmet need. Return JSON only: one object "
+    "comparisons are not locations. Historical tolls and predictions are not current affected counts. "
+    "A donation offer is not an unmet need. Return JSON only: one object "
     "with the five requested fields, without report-number wrappers, markdown, or explanations."
 )
 EXTRACT_USER = (
     "Fields:\n"
     "- hazard: the physical threat (flooding, fire, wind damage, collapse, outage)\n"
     "- location: the most specific place named\n"
-    "- people_affected: who or how many people are affected\n"
+    "- people_affected: who or how many people are explicitly affected now; null for unspecified rising tolls\n"
     "- vulnerable: any elderly, disabled, medical, pregnant, or child mention\n"
     "- need: what is being asked for\n\n"
     "Reports:\n{reports}\n\n"
@@ -46,11 +47,12 @@ EXTRACT_USER = (
 )
 
 BRIEF_SYSTEM = (
-    "You write short briefings for an emergency coordinator. Use ONLY the facts given. Write 2 or 3 sentences. "
+    "You write short briefings for an emergency coordinator. Use ONLY the facts given. Write 1 to 3 sentences. "
     "End every sentence with tags in square brackets naming the facts it uses, chosen from: "
     "hazard, location, people_affected, vulnerable, need, reason. Do not add any fact that is not given. "
     "Use one short factual claim per sentence and put its tags immediately after that sentence. "
     "Omit unknown fields. Tags contain field names only, never values. "
+    "Do not number sentences or add an introduction. Prefer 'Reports state: <exact fact quote>. [field]'. "
     "Do not infer emergencies, injuries, urgency, vulnerability, or rescue needs from ranking features. "
     "For a ranking explanation, write 'Ranked high because of' followed by the given reason phrases "
     "and tag it [reason]. Rescue/donation activity describes a ranking feature, not a request for aid."
@@ -169,10 +171,31 @@ def _recheck_cached(row: Briefing, incident: Incident, reports_by_id: dict[str, 
     sentences = []
     for old in row.sentences:
         accepted, reason = check_sentence(old["text"], old["tags"], fields, reasons, allowed)
-        sentences.append({**old, "accepted": accepted, "reject_reason": reason})
+        sentences.append({**old, "text": _clean_sentence(old["text"]),
+                          "accepted": accepted, "reject_reason": reason})
     accepted = [sentence["text"] for sentence in sentences if sentence["accepted"]]
     return replace(row, fields=fields, sentences=sentences, used_fallback=not accepted,
                    briefing=" ".join(accepted) if accepted else template_briefing(incident, fields))
+
+
+def review_cached_briefings(rows: list[Briefing], incidents: list[Incident],
+                            reports: list[Report]) -> list[Briefing]:
+    """Validate membership and current evidence checks for display/evaluation.
+
+    No model calls or writes. In particular, reused incident IDs after regrouping
+    must not bring old briefings or old quality counts into the new results.
+    """
+    by_incident = {(item.incident_id, item.snapshot_time): item for item in incidents}
+    by_report = {item.report_id: item for item in reports}
+    checked = []
+    for row in rows:
+        incident = by_incident.get((row.incident_id, row.snapshot_time))
+        if incident is None or row.cache_key != cache_key(incident, row.model_file):
+            continue
+        if not row.rep_report_ids or not set(row.rep_report_ids) <= set(incident.report_ids) & by_report.keys():
+            continue
+        checked.append(_recheck_cached(row, incident, by_report))
+    return checked
 
 
 def brief_incidents(event: str, incidents: list[Incident], top_n: int = config.TOP_N_BRIEF,
@@ -218,6 +241,7 @@ def brief_incidents(event: str, incidents: list[Incident], top_n: int = config.T
                 existing = [checked if old is cached else old for old in existing]
                 write_jsonl(output, existing)
             result.append(checked)
+            print(f'Briefing {len(result)}/{len(chosen)}: {incident.incident_id} (cache rechecked)', flush=True)
             continue
 
         if source_data is None:
@@ -268,6 +292,7 @@ def brief_incidents(event: str, incidents: list[Incident], top_n: int = config.T
         existing.append(row)
         write_jsonl(output, existing)
         result.append(row)
+        print(f'Briefing {len(result)}/{len(chosen)}: {incident.incident_id} (saved)', flush=True)
     return result
 
 

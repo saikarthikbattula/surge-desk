@@ -17,6 +17,53 @@ def evidence_ok(evidence: str | None, sources: list[str]) -> bool:
     return any(quote in normalize_for_match(source) for source in sources)
 
 
+def _current_assertion(evidence: str, sources: list[str], name: str) -> bool:
+    """Require a current assertion, rather than a historical or forecast quote.
+
+    These are conservative exclusion rules, not a claim of semantic validation.
+    Check each occurrence separately so another current report can support it.
+    """
+    quote = normalize_for_match(evidence)
+    event_year = re.search(r"_(\d{4})$", config.DEMO_EVENT)
+    for source in sources:
+        text = normalize_for_match(source)
+        for match in re.finditer(re.escape(quote), text):
+            start = max(text.rfind(mark, 0, match.start()) for mark in ".!?;\n") + 1
+            ends = [pos for mark in ".!?;\n" if (pos := text.find(mark, match.end())) >= 0]
+            clause = text[start:min(ends) if ends else len(text)]
+            if re.search(r"\b(?:historical|historically|previous|past|in comparison|back in)\b", clause):
+                continue
+            # Date context distinguishes the year 2000 from '2000 people'.
+            years = re.findall(
+                r"\b(?:in|of|during|from)\s+((?:18|19|20)\d{2})\b|"
+                r"\b((?:18|19|20)\d{2})(?:'s)?\s+(?:death|toll|storm|hurricane|flood|earthquake)\b",
+                clause)
+            years = [year for pair in years for year in pair if year]
+            if event_year and any(int(year) < int(event_year[1]) for year in years):
+                continue
+            # Requests such as 'could you send a boat' are still requests.
+            if name != "need" and re.search(
+                r"\b(?:could|might|would|forecast\w*|predict\w*|expected|projected)\b|"
+                r"\bmay\s+(?:be|have|cause|affect|displace|kill|injure|reach|rise|approach)\b", clause
+            ):
+                continue
+            if name == "people_affected":
+                # 'Death toll is rising' supplies neither who nor how many.
+                person = re.search(
+                    r"\b(?:people|persons?|residents?|famil\w*|children|child|kids?|bab\w*|"
+                    r"newborns?|adults?|patients?|victims?|responders?|workers?|men|man|women|woman|"
+                    r"elderly|seniors?|grand\w*|parents?|mothers?|fathers?|mom|dad|neighbors?)\b", quote)
+                if not person and not re.search(r"\d", quote):
+                    continue
+                # Bare counts need people/casualty context in the same sentence.
+                if not person and not re.search(
+                    r"\b(?:people|persons?|residents?|famil\w*|dead|died|death|killed|injured|"
+                    r"evacuated|displaced|missing|trapped|rescued|casualties)\b", clause):
+                    continue
+            return True
+    return False
+
+
 def _geographic_use(evidence: str, sources: list[str]) -> bool:
     """Reject quotes used only as storm names or comparison targets.
 
@@ -56,7 +103,8 @@ def ground_fields(raw: dict | None, sources: list[str]) -> dict[str, dict]:
         candidate = raw.get(name)
         candidate = candidate if isinstance(candidate, dict) else {}
         evidence = candidate.get("evidence")
-        if evidence_ok(evidence, sources) and (name != "location" or _geographic_use(evidence, sources)):
+        if (evidence_ok(evidence, sources) and _current_assertion(evidence, sources, name)
+                and (name != "location" or _geographic_use(evidence, sources))):
             confidence = candidate.get("confidence")
             if isinstance(confidence, bool):
                 confidence = 0.0
@@ -89,17 +137,28 @@ def split_tagged_sentences(text: str) -> list[tuple[str, list[str]]]:
     matches = list(re.finditer(r"(.+?)\s*\[([^\[\]]*)\]\s*\.?", text, re.S))
     out = []
     for match in matches:
-        sentence = match.group(1).strip()
+        sentence = _clean_sentence(match.group(1))
         if not sentence.endswith("."):
             sentence += "."
         tags = [tag.strip().lower() for tag in match.group(2).split(",") if tag.strip()]
         out.append((sentence, tags))
-    remainder = text[matches[-1].end():].strip() if matches else text.strip()
+    remainder = _clean_sentence(text[matches[-1].end():] if matches else text)
     if len(remainder.split()) >= 3:
         if not remainder.endswith("."):
             remainder += "."
         out.append((remainder, []))
     return out
+
+
+def _clean_sentence(text: str) -> str:
+    """Remove list labels and dangling punctuation, not factual numbers."""
+    text = re.sub(r"^\s*(?:[-*•]\s+|\d+[.)]\s+)", "", text.strip())
+    return re.sub(r"[,;:]\s*\.?$", ".", text).strip()
+
+
+def _numbers(text: str) -> list[str]:
+    # Treat 12,000 as one number; '12' and '000' cannot support a claim of 12.
+    return [value.replace(",", "") for value in re.findall(r"\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?", text)]
 
 
 def numbers_allowed(incident: Incident, fields: dict) -> set[str]:
@@ -111,13 +170,14 @@ def numbers_allowed(incident: Incident, fields: dict) -> set[str]:
     for name in BRIEF_FIELDS:
         field = fields.get(name, {})
         if field.get("grounded") and isinstance(field.get("value"), str):
-            numbers.update(re.findall(r"\d+", field["value"]))
+            numbers.update(_numbers(field["value"]))
     return numbers
 
 
 def check_sentence(sentence: str, tags: list[str], fields: dict, reasons: list[str],
                    numbers: set[str]) -> tuple[bool, str | None]:
     """Check tagged claims, ranking reasons, and every number in a sentence."""
+    sentence = _clean_sentence(sentence)
     if not tags:
         return False, "no tags"
     for tag in tags:
@@ -141,11 +201,11 @@ def check_sentence(sentence: str, tags: list[str], fields: dict, reasons: list[s
             and sum(word in words for word in reason_words) / len(reason_words) >= 0.5
             for reason in reasons
         )
-        number_supported = any(number in numbers for number in re.findall(r"\d+", sentence))
+        number_supported = any(number in numbers for number in _numbers(sentence))
         if not phrase_supported and not number_supported:
             return False, "reason not supported"
 
-    for number in re.findall(r"\d+", sentence):
+    for number in _numbers(sentence):
         if number not in numbers:
             return False, f"unsupported number '{number}'"
     # A ranking feature about rescue/donation activity cannot establish an
@@ -156,4 +216,14 @@ def check_sentence(sentence: str, tags: list[str], fields: dict, reasons: list[s
             return False, "need claim without grounded need"
         if "need" not in tags:
             return False, "need claim missing need tag"
+    if tags == ["reason"]:
+        # A matching reason word must not license an unrelated factual claim.
+        # Keep ranking explanations in the requested, visibly separate form.
+        if not re.match(r"ranked high because of\b", sentence, re.I):
+            return False, "reason not supported"
+        supported = set(content_words(" ".join(reasons))) | {
+            "ranked", "high", "because", "reports", "report",
+        } | numbers
+        if {word for word in words if not word.isdigit()} - supported:
+            return False, "reason not supported"
     return True, None

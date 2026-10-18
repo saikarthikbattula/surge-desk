@@ -45,6 +45,8 @@ def load_demo(event: str = config.DEMO_EVENT, stub: bool = False,
     # IDs may be reused when regrouping. Never attach a cached briefing to new members.
     briefs = [b for b in briefs if (incident := incident_lookup.get((b.incident_id, b.snapshot_time)))
               and (stub or cache_key is None or b.cache_key == cache_key(incident, b.model_file))]
+    if not stub and cache_key is not None:
+        briefs = require_module("brief").review_cached_briefings(briefs, incidents, reports)
     actual = config.FIXTURE_EVENT if stub else event
     snapshots = sorted({i.snapshot_time for i in incidents})
     return DemoData(actual, snapshots,

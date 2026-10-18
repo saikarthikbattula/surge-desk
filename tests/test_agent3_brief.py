@@ -199,6 +199,64 @@ def test_location_quotes_need_geographic_context():
         assert location("Houston", ["#Houston flooding #Harvey."])["grounded"]
 
 
+def test_current_assertions_exclude_historical_and_speculative_counts():
+    def fields(quote, sources, name="people_affected"):
+        return ground_fields({name: {"evidence": quote, "confidence": 1}}, sources)[name]
+
+    historical = "Harbor City in 1900 had a death toll of 8,000 or more. Today's storm could approach that number."
+    with patch.object(config, "DEMO_EVENT", "hurricane_harvey_2017"):
+        assert not fields("8,000 or more", [historical])["grounded"]
+        assert not fields("8,000 or more", ["Harbor City's 1900 Death toll reached 8,000 or more."])["grounded"]
+        assert not fields("Harbor City", [historical], "location")["grounded"]
+        for qualifier in ("could", "might", "may", "would"):
+            assert not fields("800 people", [f"The storm {qualifier} displace 800 people."])["grounded"]
+        assert not fields("death toll is rising", ["The death toll is rising."])["grounded"]
+        assert fields("First Responder", ["First Responder found dead after the storm."])["grounded"]
+        assert fields("8,000 or more", [historical, "8,000 or more people evacuated today."])["grounded"]
+        assert fields("2000 people", ["2000 people evacuated today."])["grounded"]
+        assert fields("2000 people", ["On May 5, 2000 people evacuated."])["grounded"]
+        assert fields("my grandma", ["My grandma is trapped upstairs."])["grounded"]
+        assert fields("send a boat", ["Could you send a boat?"], "need")["grounded"]
+
+
+def test_sentence_list_labels_and_whole_numbers():
+    fields = empty_fields()
+    fields["people_affected"] = {"value": "12,000 people", "evidence": "12,000 people",
+                                  "confidence": 1, "grounded": True}
+    allowed = numbers_allowed(_last_snapshot(_fixture()[2])[0], fields)
+    assert "12000" in allowed and "12" not in allowed and "000" not in allowed
+    parsed = split_tagged_sentences("2. Reports state 12,000 people,. [people_affected]")
+    assert parsed == [("Reports state 12,000 people.", ["people_affected"])]
+    assert check_sentence(*parsed[0], fields, [], allowed) == (True, None)
+    assert check_sentence("12 people.", ["people_affected"], fields, [], allowed)[0] is False
+    # Do not remove the factual count when there is no list punctuation.
+    assert split_tagged_sentences("2 people evacuated. [people_affected]")[0][0].startswith("2 people")
+    assert check_sentence("Ranked high because of classifier confidence and potential mass casualties.",
+                          ["reason"], fields, ["classifier confidence"], allowed)[0] is False
+
+
+def test_cached_historical_fields_are_removed_without_generation():
+    reports, _, incidents, _, _ = _fixture()
+    incident = _last_snapshot(incidents)[0]
+    representative = replace(reports[0], report_id=incident.report_ids[0],
+                             text="Harbor City in 1900 reported 8,000 dead. Today's storm could cause more deaths.")
+    fields = empty_fields()
+    fields["people_affected"] = {"value": "8,000", "evidence": "8,000", "confidence": 1, "grounded": True}
+    text = "1. Reports state 8,000 people,."
+    row = Briefing(incident_id=incident.incident_id, event=incident.event, snapshot_time=incident.snapshot_time,
+                   cache_key=brief.cache_key(incident, "fake"), rep_report_ids=[representative.report_id],
+                   fields=fields, sentences=[dict(text=text, tags=["people_affected"], accepted=True, reject_reason=None)],
+                   briefing=text, used_fallback=False, model_file="fake", timing=zero_timing())
+    with patch.object(config, "DEMO_EVENT", "hurricane_harvey_2017"), \
+         patch.object(brief, "get_llm", side_effect=AssertionError("Review must not load Granite")):
+        reviewed = brief.review_cached_briefings([row], [incident], [representative])
+        assert reviewed[0].used_fallback
+        assert not reviewed[0].fields["people_affected"]["grounded"]
+        assert reviewed[0].sentences[0]["text"] == "Reports state 8,000 people."
+        assert brief.review_cached_briefings([row], [replace(incident, report_ids=incident.report_ids[1:])],
+                                             [representative]) == []
+
+
 def test_ranking_reason_does_not_establish_an_unmet_need():
     sentence = "The urgency is underscored by the single report and the need for immediate rescue and donation efforts."
     reasons = ["reports of injuries or deaths", "classifier confidence", "rescue and donation activity"]

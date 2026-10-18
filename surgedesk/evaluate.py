@@ -517,6 +517,8 @@ def run_all(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
     tags = fileio.read_jsonl(d / config.TAGGED_FILE, Tagged) if (d / config.TAGGED_FILE).exists() else None
     incidents = fileio.read_jsonl(d / config.INCIDENTS_FILE, Incident) if (d / config.INCIDENTS_FILE).exists() else None
     briefs = fileio.read_jsonl(d / config.BRIEFINGS_FILE, Briefing) if (d / config.BRIEFINGS_FILE).exists() else []
+    if briefs:
+        briefs = require_module("brief").review_cached_briefings(briefs, incidents or [], reports or [])
     meta = fileio.read_json(config.RANKER_META_PATH) if config.RANKER_META_PATH.exists() else {}
     info = envcheck.collect()
     summary = {"event": event, "measured_on": {k: info[k] for k in ("arch", "cores", "ram_gb", "nnpa_flag")},
