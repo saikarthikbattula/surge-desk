@@ -185,6 +185,149 @@ def test_place_matcher_traps():
         assert PlaceMatcher("kerala_floods_2018").match("Houston") == ([], None)
 
 
+def _quality_gazetteer():
+    """Extend in-memory fixture copies; geometry here is synthetic test input."""
+    gaz = _gaz()
+    for state, fips, name, lat, lon in [
+        ("NC", "37067", "Forsyth County", "36.1", "-80.2"),
+        ("NC", "37023", "Burke County", "35.7", "-81.7"),
+        ("MO", "29510", "St. Louis city", "38.6", "-90.2"),
+    ]:
+        gaz.counties.append(dict(gaz.counties[0], USPS=state, GEOID=fips,
+                                 NAME=name, INTPTLAT=lat, INTPTLONG=lon))
+    for state, name, area, lat, lon in [
+        ("NC", "Winston-Salem city", "100", "36.1", "-80.2"),
+        ("NC", "Salem CDP", "10", "35.7", "-81.7"),
+        ("MO", "St. Louis city", "100", "38.6", "-90.2"),
+        ("TX", "Briarfield city", "100", "29.8578", "-95.3936"),
+        ("LA", "Briarfield town", "10", "30.229", "-93.3575"),
+    ]:
+        gaz.places.append(dict(gaz.places[0], USPS=state, NAME=name,
+                               ALAND=area, INTPTLAT=lat, INTPTLONG=lon))
+    return gaz
+
+
+def test_place_names_share_report_punctuation_boundaries():
+    gaz = _quality_gazetteer()
+    matcher = PlaceMatcher("hurricane_florence_2018", gaz)
+    for text in ("Winston-Salem, NC needs water", "Winston Salem North Carolina",
+                 "#WinstonSalemFlood", "#WINSTONSalemFlood"):
+        assert matcher.match(text) == (["Winston-Salem"], "37067"), text
+    assert matcher.match("Salem NC needs water") == (["Salem"], "37023")
+    # Reject the complete qualified name without falling back to its suffix.
+    assert matcher.match("Winston-Salem, TX needs water") == ([], None)
+    other = PlaceMatcher("midwest_floods_2019", gaz)
+    assert other.match("St. Louis, MO needs boats") == (["St. Louis"], "29510")
+    assert other.match("St Louis city Missouri") == (["St. Louis city"], "29510")
+    assert other.match("#StLouisCityFlood") == (["St. Louis city"], "29510")
+    # The public raw index remains unchanged; county keys still override places.
+    assert "st. louis" in gaz.place_index(["MO"])
+    assert gaz.place_index(["MO"])["st. louis city"] == ("St. Louis city", "29510")
+
+
+def test_qualifiers_reject_out_of_event_namesakes():
+    matcher = PlaceMatcher("hurricane_harvey_2017", _quality_gazetteer())
+    for text in ("Houston, MS needs boats", "Houston Mississippi needs boats",
+                 "Houston, New York needs boats", "Houston IN needs boats",
+                 "Mission California flooding", "Harris County, Mississippi"):
+        assert matcher.match(text) == ([], None), text
+    assert matcher.match("Houston in need of boats") == (["Houston"], "48201")
+    assert matcher.match("Houston or Katy needs boats")[0] == ["Houston", "Katy"]
+    assert matcher.match("Houston MS; Lake Charles LA needs water") == (["Lake Charles"], "22019")
+    assert matcher.match("Houston, tx needs boats") == (["Houston"], "48201")
+    # A valid event state cannot borrow a candidate from the other event state.
+    assert matcher.match("Houston Louisiana needs boats") == ([], None)
+    assert matcher.match("Calcasieu Parish, Texas needs boats") == ([], None)
+
+
+def test_duplicate_names_use_qualified_state_and_same_state_centroids():
+    gaz = _quality_gazetteer()
+    matcher = PlaceMatcher("hurricane_harvey_2017", gaz)
+    assert matcher.match("Briarfield needs water") == (["Briarfield"], "48201")
+    assert matcher.match("Briarfield LA needs water") == (["Briarfield"], "22019")
+    assert matcher.match("Briarfield Texas needs water") == (["Briarfield"], "48201")
+    assert matcher.match("Briarfield Mississippi needs water") == ([], None)
+    # Even a closer out-of-state centroid cannot supply a place's county.
+    gaz.counties.append(dict(gaz.counties[0], USPS="LA", GEOID="22999",
+                             NAME="Synthetic Parish", INTPTLAT="29.7863", INTPTLONG="-95.3889"))
+    gaz._indexes.clear()
+    assert gaz.place_index(["TX", "LA"])["houston"] == ("Houston", "48201")
+    assert matcher.match("Calcasieu Parish and Harris County") == (["Calcasieu Parish", "Harris County"], "22019")
+
+
+def test_acronym_hashtags_preserve_storm_and_common_word_suppression():
+    matcher = PlaceMatcher(config.FIXTURE_EVENT, _gaz())
+    for text in ("#HoustonFlood", "#HOUSTONFlood", "#HOUSTON", "#HoustonTXFlood"):
+        assert matcher.match(text) == (["Houston"], "48201"), text
+    assert matcher.match("#MISSIONAccomplished") == ([], None)
+    assert matcher.match("#MissionTXFlood") == (["Mission"], "48215")
+    assert matcher.match("#MISSIONTexasFlood") == (["Mission"], "48215")
+    assert matcher.match("#HoustonFlood #KatyFlood Houston Harris County") == (["Houston", "Katy", "Harris County"], "48201")
+    class StormGazetteer:
+        def place_index(self, states):
+            return {"harvey": ("Harvey", "22071")} if "LA" in states else {}
+    storm = PlaceMatcher("hurricane_harvey_2017", StormGazetteer())
+    for text in ("#HARVEYFlood", "#HURRICANEHarvey", "#HurricaneHarveyLA",
+                 "Tropical storm Harvey Louisiana", "Cyclone Harvey LA", "Typhoon Harvey LA"):
+        assert storm.match(text) == ([], None), text
+    assert storm.match("#HARVEYLouisianaFlood") == (["Harvey"], "22071")
+
+
+def test_addresses_zips_and_missing_location_data_remain_unknown():
+    matcher = PlaceMatcher("hurricane_harvey_2017", _gaz())
+    # Fabricated address/contact, unrelated to the private diagnostic export.
+    for text in ("Need oxygen at 123 Example Lane, TX 77001; call 202-555-0142",
+                 "Send boats to ZIP 77001-1234", "Please help everyone after Harvey",
+                 "Need help somewhere in Texas", "", "123456789"):
+        assert matcher.match(text) == ([], None), text
+    assert matcher.match("123 Example Lane, Houston TX 77001") == (["Houston"], "48201")
+    with tempfile.TemporaryDirectory() as temp:
+        try:
+            Gazetteer(Path(temp))
+        except FileNotFoundError:
+            pass
+        else:
+            raise AssertionError("Missing Gazetteer silently accepted")
+    gaz = _quality_gazetteer()
+    gaz.counties = [c for c in gaz.counties if c["USPS"] != "TX"]
+    assert PlaceMatcher("hurricane_harvey_2017", gaz).match("Houston TX") == ([], None)
+
+
+def test_location_changes_leave_classifier_embedding_and_vulnerability_outputs_unchanged():
+    _require_classifier()
+    with tempfile.TemporaryDirectory() as temp:
+        classifier = Path(temp) / "classifier.joblib"
+        tag.train_classifier([config.FIXTURE_TRAIN_EVENT], allow_fixture=True,
+                             classifier_path=classifier, outputs_root=config.FIXTURES / "outputs")
+        texts = ["Elderly residents need water in #HOUSTONFlood",
+                 "A child needs boats in Houston, MS",
+                 "Pregnant neighbor at 123 Example Lane, TX 77001"]
+        reports = [replace(r, text=text) for r, text in zip(load_fixture(config.REPORTS_FILE, Report), texts)]
+        vectors = load_fixture(config.EMBEDDINGS_FILE)[:len(reports)].copy()
+        before = vectors.copy()
+        class UnknownMatcher:
+            def match(self, text):
+                return [], None
+        baseline = tag.Tagger(config.DEMO_EVENT, classifier_path=classifier, matcher=UnknownMatcher())
+        actual = tag.Tagger(config.DEMO_EVENT, classifier_path=classifier,
+                            matcher=PlaceMatcher(config.DEMO_EVENT, _gaz()))
+        original, baseline_vectors = baseline.tag_batch(reports, vectors, start_row=11)
+        changed, used = actual.tag_batch(reports, vectors, start_row=11)
+        assert [(t.places, t.county_fips) for t in changed] == [(["Houston"], "48201"), ([], None), ([], None)]
+        assert [t.report_id for t in changed] == [r.report_id for r in reports]
+        assert [t.emb_row for t in changed] == list(range(11, 11 + len(reports)))
+        assert np.array_equal(used, before) and np.array_equal(vectors, before)
+        assert np.array_equal(baseline_vectors, used)
+        for old, new, report in zip(original, changed, reports):
+            new.validate()
+            assert new.vuln_terms == tag.find_vuln_terms(report.text)
+            old_dict, new_dict = old.to_dict(), new.to_dict()
+            for key in ("places", "county_fips"):
+                old_dict.pop(key)
+                new_dict.pop(key)
+            assert old_dict == new_dict
+
+
 def test_svi_fixture():
     svi = SVI(config.FIXTURES / "svi" / "svi_counties.csv")
     assert svi.available
