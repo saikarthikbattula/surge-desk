@@ -5,7 +5,7 @@ import math
 import re
 
 from . import config
-from .contracts import BRIEF_FIELDS, SENTENCE_TAGS, Incident, feature_reason
+from .contracts import BRIEF_FIELDS, SENTENCE_TAGS, VULN_TERMS, Incident, feature_reason
 from .textutil import content_words, normalize_for_match
 
 
@@ -214,7 +214,10 @@ def check_sentence(sentence: str, tags: list[str], fields: dict, reasons: list[s
             return False, f"unsupported number '{number}'"
     # A ranking feature about rescue/donation activity cannot establish an
     # actual unmet need. Check the claim even if the model omits its field tag.
-    if re.search(r"\b(?:needs?|needed|requires?|required|requiring)\b", sentence, re.I):
+    if (re.search(r"\b(?:needs?|needed|requires?|required|requiring)\b", sentence, re.I)
+            or (tags != ["reason"] and re.search(
+                r"\b(?:requests?|requested|requesting)\b|\b(?:asks?|asking) for\b|"
+                r"\bplease (?:send|bring|help|rescue)\b", sentence, re.I))):
         need = fields.get("need", {})
         if not need.get("grounded") or not need.get("value"):
             return False, "need claim without grounded need"
@@ -237,4 +240,25 @@ def check_sentence(sentence: str, tags: list[str], fields: dict, reasons: list[s
             remainder = re.sub(r"\band\b|[\s,;.]+", "", remainder)
             if remainder:
                 return False, "reason not supported"
+    if tags != ["reason"]:
+        quotes = " ".join(
+            field["value"] for field in fields.values()
+            if field.get("grounded") and isinstance(field.get("value"), str)
+        )
+        # Existing overlap checks alone permit an extra claim after a valid
+        # quote. Sensitive claim words need their own literal report support;
+        # ranking/category vocabulary cannot supply it. This is conservative
+        # lexical screening, not general semantic entailment.
+        claims = (
+            ("urgency", r"\b(?:urgen\w*|immediate\w*|emergenc\w*|critical\w*|life[- ]threatening)\b"),
+            ("hazard", r"\b(?:flood\w*|fire\w*|wildfire\w*|earthquake\w*|tsunami\w*|"
+             r"collapse\w*|outage\w*|hurricane\w*|tornado\w*)\b"),
+            ("vulnerability", r"\b(?:" + "|".join(re.escape(term) for term in VULN_TERMS) + r")\b"),
+            ("need", r"\b(?:rescue\w*|boats?|food|blankets?|supplies|medicine|medication|"
+             r"ventilators?|generators?|shelter|ambulance|evacuation)\b"),
+        )
+        for kind, pattern in claims:
+            for match in re.finditer(pattern, sentence, re.I):
+                if not re.search(r"(?<!\w)" + re.escape(match[0]) + r"(?!\w)", quotes, re.I):
+                    return False, f"unsupported {kind} claim '{match[0].lower()}'"
     return True, None
