@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import html
 import re
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -23,36 +25,98 @@ def feature_keys(event: str) -> list[str]:
     return RANK_FEATURE_KEYS if config.ranking_objective(event) == "assistance_v1" else FEATURE_KEYS
 
 
+def feature_definition(event: str) -> str | None:
+    """Bind assistance models to executable features and shared cue policy.
+
+    A feature order alone cannot detect changed semantics. Legacy archives and
+    frozen fixtures deliberately retain their original loading behavior.
+    """
+    if config.ranking_objective(event) != "assistance_v1":
+        return None
+    policy = {name: getattr(config, name) for name in (
+        "ASSISTANCE_PATTERNS", "ASSISTANCE_NEGATION", "ASSISTANCE_SPECULATION",
+        "ASSISTANCE_HISTORY", "CASUALTY_PATTERN", "WINDOW_HOURS")}
+    digest = hashlib.sha256(Path(__file__).read_bytes())
+    digest.update(json.dumps(policy, sort_keys=True).encode())
+    return digest.hexdigest()
+
+
 def assistance_signals(report: Report) -> dict:
     """Conservative text cues, never gold labels or Granite output.
 
     A cue indicates a reason for review, not a verified current emergency.
     Check clauses independently so old context does not suppress a new request.
     """
-    current, historical, casualty, evidence = _signal_values(mask_privacy(report.text), parse_iso(report.timestamp).year)
+    current, historical, casualty, evidence = _signal_values(
+        mask_privacy(report.text), parse_iso(report.timestamp).year,
+        tuple(config.ASSISTANCE_PATTERNS), config.ASSISTANCE_NEGATION,
+        config.ASSISTANCE_HISTORY, config.ASSISTANCE_SPECULATION, config.CASUALTY_PATTERN)
     return {"current_assistance": current, "historical_or_speculative": historical,
             "casualty_only": casualty, "evidence": list(evidence)}
 
 
+def _clauses(text):
+    """Analyze decoded clauses, but quote exact spans of the masked source.
+
+    Entity semicolons are not sentence boundaries. Retain an offset map so
+    evidence remains a source substring even when decoding changes its length.
+    Split coordinated predicates, not resource lists such as food and water.
+    """
+    decoded, starts, ends = [], [], []
+    cursor = 0
+    for entity in re.finditer(r"&(?:#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]+);?", text):
+        for index in range(cursor, entity.start()):
+            decoded.append(text[index])
+            starts.append(index)
+            ends.append(index + 1)
+        value = html.unescape(entity.group())
+        decoded.extend(value)
+        starts.extend([entity.start()] * len(value))
+        ends.extend([entity.end()] * len(value))
+        cursor = entity.end()
+    for index in range(cursor, len(text)):
+        decoded.append(text[index])
+        starts.append(index)
+        ends.append(index + 1)
+    decoded = "".join(decoded)
+    boundary = (r"[.!?;\n]+|\bbut\b|"
+                r"\b(?:and|while|yet)\s+(?=(?:i|we|they|he|she|my|our|the|a|an|"
+                r"need|needs|require|requires|request|please|still|not|don['’]t|doesn['’]t|do|does)\b)|"
+                r",\s*(?=(?:i|we|they|he|she|my|our)\b)")
+    cursor = 0
+    for match in re.finditer(boundary, decoded, re.I):
+        if cursor < match.start():
+            yield decoded[cursor:match.start()], text[starts[cursor]:ends[match.start() - 1]].strip()
+        cursor = match.end()
+    if cursor < len(decoded):
+        yield decoded[cursor:], text[starts[cursor]:ends[-1]].strip()
+
+
 @lru_cache(maxsize=config.ASSISTANCE_CACHE_SIZE)
-def _signal_values(text: str, year: int):
+def _signal_values(text: str, year: int, patterns, negation, history, speculation, casualty_pattern):
     """Bounded cache of masked-text cues, reused across snapshot rows."""
     current, historical, casualty = False, False, False
     evidence = []
-    for clause in re.split(r"[.!?;\n]+|\bbut\b", text, flags=re.I):
+    for clause, source in _clauses(text):
         low = clause.lower().replace("’", "'")
         years = re.findall(r"\b(?:in|of|during|from)\s+((?:18|19|20)\d{2})\b|"
                            r"\b((?:18|19|20)\d{2})(?:'s)?\s+(?:death|toll|storm|hurricane|flood|earthquake)\b", low)
-        old = bool(re.search(config.ASSISTANCE_HISTORY, low) or
-                   re.search(config.ASSISTANCE_SPECULATION, low) or
+        old = bool(re.search(history, low) or
+                   re.search(speculation, low) or
                    any(int(y) < year for pair in years for y in pair if y))
         historical |= old
-        casualty |= bool(re.search(config.CASUALTY_PATTERN, low))
-        if old or re.search(config.ASSISTANCE_NEGATION, low):
+        casualty |= bool(re.search(casualty_pattern, low))
+        if old or re.search(negation, low):
             continue
-        if any(re.search(pattern, low) for pattern in config.ASSISTANCE_PATTERNS):
+        matches = [m for pattern in patterns for m in re.finditer(pattern, low)]
+        # A context marker scopes forward within its clause. A request before
+        # trailing conditional advice remains observed ("we need water if you
+        # can deliver"). Existing unnamed shared patterns remain compatible.
+        contexts = [m for m in matches if m.lastgroup == "context"]
+        if any(m.lastgroup != "context" and not any(c.start() <= m.start() for c in contexts)
+               for m in matches):
             current = True
-            evidence.append(clause.strip())
+            evidence.append(source)
     return current, historical, casualty and not current, tuple(evidence)
 
 

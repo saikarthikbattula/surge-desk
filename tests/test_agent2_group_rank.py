@@ -10,7 +10,7 @@ import pandas as pd
 
 from surgedesk import baselines, config, fairness, fileio, rank
 from surgedesk.contracts import FEATURE_KEYS, RANK_FEATURE_KEYS, Incident, Report, Tagged
-from surgedesk.features import SNAPSHOT_COLUMNS, assistance_signals, build_snapshots, snapshot_features
+from surgedesk.features import SNAPSHOT_COLUMNS, assistance_signals, build_snapshots, feature_definition, snapshot_features
 from surgedesk.group import GroupState, group_event, load_stage1
 from surgedesk.testing import skip, load_fixture, fixture_dir
 from surgedesk.textutil import parse_iso, to_iso
@@ -246,6 +246,14 @@ def test_assistance_features_have_no_future_or_gold_leakage():
     state = GroupState(event)
     tag = replace(tags[0], report_id=earlier.report_id, places=[], county_fips=None)
     state.add(earlier, tag, emb[0])
+    from types import SimpleNamespace
+    with patch.object(config, "RANKING_OBJECTIVE", "assistance_v1"):
+        before_later = snapshot_features(next(iter(state.incidents.values())), parse_iso(earlier.timestamp), lambda f: None)
+        model = SimpleNamespace(meta={"objective": "assistance_v1", "train_events": ["training_event"],
+                                      "feature_definition": feature_definition(event)},
+                                score=lambda rows: rows["share_current_assistance"].to_numpy(),
+                                explain=lambda rows: [[] for _ in range(len(rows))])
+        earlier_ranked = rank.rank_now(state, parse_iso(earlier.timestamp), model, lambda f: None)
     state.add(later, replace(tag, report_id=later.report_id), emb[0])
     incident = next(iter(state.incidents.values()))
     with patch.object(config, "RANKING_OBJECTIVE", "assistance_v1"):
@@ -254,12 +262,135 @@ def test_assistance_features_have_no_future_or_gold_leakage():
         assert list(before) == RANK_FEATURE_KEYS
         assert before["share_current_assistance"] == 0 and after["share_current_assistance"] == 0.5
         assert before["share_casualty_only"] == 1
+        # Adding a later member cannot retroactively change an earlier snapshot.
+        assert before == before_later
+        assert rank.rank_now(state, parse_iso(earlier.timestamp), model, lambda f: None) == earlier_ranked
         incident.reports = [replace(r, gold_label=None) for r in incident.reports]
         assert snapshot_features(incident, parse_iso(later.timestamp), lambda f: None) == after
         from surgedesk.stubs import reference_urgent_proxy
         assert reference_urgent_proxy([earlier]) == 0
         assert reference_urgent_proxy([later]) == 1
         assert reference_urgent_proxy([replace(later, gold_label=None)]) is None
+
+
+def _require_coordinated_cue_policy():
+    if not any("(?P<resource>" in p for p in config.ASSISTANCE_PATTERNS):
+        skip("Specific-need policy awaits Person 1/Agent 4 shared config patch; do not deploy the owned-files PR alone")
+
+
+def test_specific_assistance_pairs_with_coordinated_policy():
+    _require_coordinated_cue_policy()
+    source = load_fixture(config.REPORTS_FILE, Report)[0]
+    positive = [
+        # Concrete resources do not imply a confirmed life-threatening rescue.
+        "Urgently requesting personal-care goods, clothes, bedding, food and water.",
+        "Please donate blankets and diapers to the neighborhood collection team.",
+        "An elderly resident needs a nebulizer.", "My mother needs oxygen.",
+        "My friend urgently needs help distributing fuel in Lakeside.",
+        "The rescue team reportedly needs food and gas; where can we send them?",
+        "The shelter reports it is running out of food.",
+        "We need shelter tonight.", "WE NEED SHELTER TONIGHT!",
+        "We need shelter if you can help.", "We need water and don't need food.",
+        "We need water and don’t need food.",
+        "A family needs help.", "My neighbor needs assistance.",
+        "We need medical attention.", "One injured person requires aid.",
+        "We need drinking water.", "Water is urgently needed at the depot.",
+        "Anyone have a boat near the school?", "Volunteers needed at the shelter.",
+        "My neighbors need to be rescued.", "We are not rescued yet.",
+        "Two residents are stranded upstairs.", "A child is missing near the park.",
+        "Police searching for a missing child.", "SOS!", "Help us!",
+        "We don't need food but need water.",
+        "We don't need food and we need insulin.",
+        "A family was rescued and we need an ambulance for another resident.",
+        "The family was rescued and needs medication.",
+        "CNN interviewed a rescued resident; my father needs oxygen.",
+        "Please donate if you can; we need insulin.",
+        "If you need shelter, go to the center; we need a boat for our neighbor.",
+        "We need food &amp; water.", "We need blankets &#38; diapers!",
+        "We need food &AMP; water.",
+        "We don&apos;t need water; my child needs insulin.",
+        "Last year families were stranded; we need rescue boats now.",
+        "They predict floods tomorrow; a family is trapped now.",
+        "A rescued woman needs insulin for tonight.",
+    ]
+    negative = [
+        "Please donate and help people in need.",
+        "Find out how to help families after the storm.",
+        "Thousands of students were affected and need help.",
+        "People need help, not more interviews of a rescued woman.",
+        "We are not an intake center; if you need shelter, go to the civic center.",
+        "Donate today because people need help.",
+        "Join our general medical fundraiser to help people.",
+        "Fundraising for families who need medical care.",
+        "If you need shelter tonight, visit the school.",
+        "If we need shelter tomorrow, we will call.",
+        "Whenever anyone needs water, call the center.",
+        "Here are food and gas donation publicity photos.",
+        "A rescued woman described her interview and the food she received.",
+        "Family rescued and safe now.", "They were rescued and no longer need help.",
+        "We don't need water.", "We do not need a nebulizer.",
+        "We don&apos;t need food &amp; water.",
+        "The missing child was found safe.", "Nobody is trapped here; no rescue needed.",
+        "They might need medicine tomorrow.", "The storm could leave families stranded.",
+        "Last year we needed water.", "In 1912 families were stranded.",
+        "We offer water and food to volunteers.", "We need your help.",
+        "People need help.", "A large population needs assistance.",
+        "Medicine, boats, water, shelter.", "Please help the hurricane campaign.",
+        "The community's need for help is huge.",
+    ]
+    for expected, examples in ((True, positive), (False, negative)):
+        for text in examples:
+            report = replace(source, text=text, gold_label=None)
+            signals = assistance_signals(report)
+            assert signals["current_assistance"] == expected, (expected, text, signals)
+            assert assistance_signals(replace(report, gold_label="requests_or_urgent_needs")) == signals
+            assert bool(signals["evidence"]) == expected
+
+
+def test_html_analysis_preserves_source_evidence_and_stored_reports():
+    source = load_fixture(config.REPORTS_FILE, Report)[0]
+    from surgedesk.textutil import mask_privacy
+    for text, evidence in (
+        ("We need food &amp; water.", "We need food &amp; water"),
+        ("We need water&#33; No further update.", "We need water"),
+        ("@sample We need food &amp; water; https://example.test", "@user We need food &amp; water"),
+        ("We don&apos;t need food; we need water.", "we need water"),
+    ):
+        report = replace(source, text=text)
+        signals = assistance_signals(report)
+        assert signals["evidence"] == [evidence], signals
+        assert evidence in mask_privacy(text)
+        assert report.text == text
+
+
+def test_assistance_feature_policy_invalidates_models_and_memory_cache():
+    from types import SimpleNamespace
+    event = "operational_test_2017"
+    source = replace(load_fixture(config.REPORTS_FILE, Report)[0], event=event, text="We need water.")
+    with patch.object(config, "RANKING_OBJECTIVE", "assistance_v1"):
+        definition = feature_definition(event)
+        model = SimpleNamespace(meta={"objective": "assistance_v1", "train_events": ["training_event"],
+                                      "feature_definition": definition})
+        rank._check_model(model, event)
+        assert assistance_signals(source)["current_assistance"]
+        with patch.object(config, "ASSISTANCE_PATTERNS", ()):
+            assert not assistance_signals(source)["current_assistance"]
+            assert feature_definition(event) != definition
+            try:
+                rank._check_model(model, event)
+            except ValueError as exc:
+                assert "Retrain" in str(exc)
+            else:
+                raise AssertionError("Same-schema old feature semantics must require retraining")
+        assert assistance_signals(source)["current_assistance"]
+        del model.meta["feature_definition"]
+        try:
+            rank._check_model(model, event)
+        except ValueError as exc:
+            assert "Retrain" in str(exc)
+        else:
+            raise AssertionError("Pre-fingerprint assistance model must require retraining")
+        assert feature_definition(config.FIXTURE_EVENT) is None
 
 
 def test_old_assistance_cues_expire_while_new_context_keeps_incident_open():
@@ -349,6 +480,23 @@ def test_assistance_training_backup_rerank_live_parity_and_stale_cache():
             now = parse_iso(rank.pick_demo_snapshot(rows))
             live = rank.rank_now(state, now, model, lambda f: None)
             assert live == [i for i in rows if i.snapshot_time == to_iso(now)]
+            for inc in state.incidents.values():
+                inc.reports = [replace(r, gold_label=None) for r in inc.reports]
+            without_gold = rank.rank_now(state, now, model, lambda f: None)
+            assert [replace(i, urgent_proxy=None) for i in live] == without_gold
+            # Same-schema assistance models from before this feature revision fail
+            # at load time, including cached/offline and live entry points.
+            meta_path = model_path.parent / config.RANKER_META_PATH.name
+            old_meta = dict(meta)
+            old_meta.pop("feature_definition")
+            fileio.write_json(meta_path, old_meta)
+            try:
+                rank.Ranker(model_path)
+            except ValueError as exc:
+                assert "Retrain" in str(exc)
+            else:
+                raise AssertionError("Old assistance model must not load")
+            fileio.write_json(meta_path, meta)
             # The production schema crosses evaluation, UI, and brief contracts
             # without loading MiniLM or Granite or modifying frozen fixtures.
             from surgedesk import brief, evaluate, ui
