@@ -1,6 +1,6 @@
 # SurgeDesk
 
-SurgeDesk turns a stream of disaster reports into a ranked list of incidents with quoted evidence a coordinator can inspect. Local models tag reports, group related messages, rank incidents, and draft grounded briefings. A human accepts, overrides, or dismisses each recommendation; SurgeDesk never dispatches help.
+SurgeDesk is a research prototype that turns historical disaster reports into a ranked list of incidents for a coordinator to inspect. Local models tag reports, group related messages, and rank incidents. An experimental IBM Granite stage attempts evidence-based extraction and briefings, with explicitly labeled template fallbacks when generation or checks fail. A human accepts, overrides, or dismisses each recommendation; SurgeDesk never dispatches help.
 
 **IBM Datathon 2026 · Theme 1: Real-Time AI for Critical Decisions.**
 
@@ -14,7 +14,7 @@ SurgeDesk turns a stream of disaster reports into a ranked list of incidents wit
 | Brief | Locally converted IBM Granite extracts quoted fields and drafts sentences; grounding checks reject unsupported output and provide a template fallback | Agent 3 |
 | Review | Historical replay, evidence cards, fairness slider, and an append-only validated human decision log | Agent 4 |
 
-Granite explains the stored ranking. Gold labels are evaluation/training targets only, and the configured demo event is excluded from training. Runtime model and data access is local; preparation scripts perform the downloads.
+Granite receives representative report text for extraction and briefing; it does not calculate or change the incident ranking. The interface separately explains the ranking model and priority policy. Gold labels are evaluation/training targets only, and the configured demo event is excluded from training. Runtime model and data access is local; preparation scripts perform the downloads.
 
 ## Running on IBM LinuxONE
 
@@ -22,35 +22,123 @@ The supplied Dockerfile extends IBM's s390x JupyterLab container. Person 3 uses 
 
 IBM's environment provides zDNN/NNPA libraries. Hardware capability and the presence of a library do not establish an accelerated execution path: use the environment report, Granite load logs, and `benchmark.py` outputs as evidence. Device comparisons are explicitly skipped unless Agent 1 supplies `embed.compare_devices`.
 
-**Current checkout:** All four agents' stages are integrated. Person 1 has exercised the real data/model workflow on LinuxONE, including the fixed BE Granite model and guarded fallback briefings. The revised assistance ranking needs a new LinuxONE training/ranking/evaluation run before its quality or performance can be claimed. Only Person 1 runs code on the VM.
+**Validated workflow:** The real-data embedding, classifier, tagging, assistance-ranking, and evaluation stages have completed on LinuxONE. Historical replay, dashboard interaction, and decision logging have been checked by the human operator. The latest bounded Granite review produced no grounded fields and used templates throughout; two extraction calls failed JSON parsing after their bounded retries. This is a functioning prototype, not a validated emergency-prioritization system. See the current generated [LinuxONE results](docs/RESULTS.md). Formal current runtime/acceleration comparisons have not been established.
 
-## Quick start
+## Quick start: synthetic fixture demo
 
-Local fixture check, from the repository root:
+This route runs without real HumAID data, MiniLM weights, or a Granite model. The fixtures are synthetic; their scores and timings are not production results. Run commands from the repository root.
 
 ```bash
-python -m surgedesk.selftest
+git clone --branch a4-integration https://github.com/saikarthikbattula/surge-desk.git
+cd surge-desk
+```
+
+On a development laptop, use a Python virtual environment. Python 3.12 is recommended to mirror the validated container. The development requirements include the optional Granite backend, which may require a platform C/C++ build toolchain. A big-endian LinuxONE GGUF must not be loaded on a little-endian laptop; use a compatible LE model or the fixture/fake path.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
 bash run_all.sh --stub
+jupyter lab
 ```
 
-Use the Python interpreter with the dependencies from `requirements-dev.txt`. Open `notebooks/04_demo.ipynb`, set `STUB = True`, then Restart Kernel and Run All. Stub scores are synthetic and must never be used as model performance claims. Nonzero fairness adjustments require Agent 2's module; lambda-zero stored cards remain available before it arrives.
+`run_all.sh --stub` runs the environment check, self-test, and synthetic pipeline. Optional model-dependent tests may skip when local model files are absent. For the self-test alone, use `python -m surgedesk.selftest`.
 
-For deployment, Person 1 follows the complete [VM runbook](handoffs/person1_vm_runner.md). Preparation and execution commands, in their documented environments:
+Open `notebooks/04_demo.ipynb`, set `STUB = True`, then choose **Restart Kernel and Run All Cells**. It shows synthetic cards and skips real-data replay. If interactive widgets are unavailable, the notebook also renders static HTML cards. Test decisions append to `outputs/_stub/fixture_event/decisions.jsonl`.
+
+## Run an existing LinuxONE installation
+
+The validated deployment used IBM's running `notebook` container with its preinstalled packages. It did not require installing Python packages on the VM or replacing the container. The Dockerfile is available as an optional deployment definition; the observed workflow is the existing IBM container, not a claimed new custom-image validation.
+
+From the VM host terminal, enter the existing container:
 
 ```bash
-bash scripts/download_data.sh           # VM shell; also follow its SVI instructions
-python scripts/download_minilm.py       # container terminal
-bash scripts/convert_granite.sh          # Person 3's laptop; then transfer the big-endian model
-
-docker build -t surgedesk:latest .       # VM shell
-# Start the mounted container as described in the VM runbook.
-bash run_all.sh                         # container terminal, repo root
-bash run_benchmark.sh                   # container terminal, other kernels shut down
+docker exec -it notebook bash
 ```
 
-Then open `notebooks/04_demo.ipynb` with `STUB = False`. `notebooks/05_eval_benchmark.ipynb` reads saved evaluation and benchmark files and shows missing results without starting heavy work. Both notebooks begin with the frozen environment bootstrap.
+Inside that container:
 
-Notebook 03 defaults to a short review: `SURGEDESK_TOP_N=3` unless explicitly set otherwise, `RUN_SPEED_PROBE=False`, `RUN_EXTRACTION_EVAL=False`, and cached briefings reused. It loads Granite only for an uncached call and uses the fixed BE model if present and no model override was supplied. With no grounded extraction fields, the pipeline skips sentence generation and uses the labeled template. Set `FORCE_BRIEFINGS=True` only to test new prompts deliberately. For the same smaller CLI workload use `SURGEDESK_TOP_N=3 python -m surgedesk.pipeline --stage brief`; the full CLI default in the frozen config remains unchanged. Notebook probes are development checks, not formal benchmark results. Larger incident counts and extraction-evaluation batches remain explicit choices.
+```bash
+source /opt/venv/bin/activate
+cd /home/ibm-user/shared/surgedesk
+python -m surgedesk.envcheck
+```
+
+These are the paths used in the validated environment. If your mount differs, use your actual repository location and set `SURGEDESK_ROOT` before importing SurgeDesk. The older planning runbook uses `/home/jovyan/...`; that is not the mount used by this installation.
+
+If datasets, saved models, and `outputs/hurricane_harvey_2017/` already exist, open `notebooks/04_demo.ipynb` in the existing JupyterLab session, set `STUB = False`, and Restart Kernel / Run All. The notebook runs historical replay, displays stored ranking cards, and offers Accept / Override / Dismiss with notes. Lambda reorders stored scores without loading Granite. Template badges and unknown fields reflect unavailable or rejected model output.
+
+Notebook 05 reads saved evaluation and benchmark artifacts. It performs no training, model inference, or benchmark runs. Missing results remain explicitly unavailable. Open `notebooks/05_eval_benchmark.ipynb` and Restart Kernel / Run All to inspect the current files. Notebook 03 is an optional, separate, potentially slow Granite review; it is not required to display an existing dashboard.
+
+## Real-data setup and pipeline reproduction
+
+**A fresh clone contains code and synthetic fixtures, not the real data, generated outputs, or model weights.** Obtain local data/model artifacts separately under their source terms. The expected layout is:
+
+```text
+data/raw/humaid/                 # Event train/dev/test TSVs; nested directories are supported
+data/raw/gazetteer/              # Census national place and county Gazetteer text files
+data/raw/svi/svi_counties.csv     # County SVI values
+models/minilm/                  # Local tokenizer/config and model.safetensors
+models/granite/                 # Optional compatible Granite GGUF
+models/classifier.joblib        # Produced by the classifier stage
+models/ranker.json              # Produced by the ranker stage
+models/ranker_meta.json          # Produced beside the ranker
+outputs/hurricane_harvey_2017/   # Runtime artifacts, created by the pipeline
+data/labels/                    # Optional private reference-label CSVs
+```
+
+The preparation scripts `scripts/download_data.sh` and `scripts/download_minilm.py` retrieve HumAID/Gazetteer and MiniLM respectively; county SVI is supplied separately as described by the data script. Preparation needs network access. Project inference code uses local files only. A supplied private data pack can populate the same paths without downloading again. Preserve its checksum manifest if available.
+
+Use the existing Python environment in IBM's container; do not run laptop dependency installation commands there. Confirm paths with `python -m surgedesk.envcheck` before running stages.
+
+The verified model artifact for LinuxONE is:
+
+```text
+granite-3.3-2b-instruct-be-fixed.q8_0.gguf
+SHA-256: acc4c60e677f954b804ad95cb3c721061a985d199f4f2b86679f6932ad9c759d
+```
+
+For an existing copy, select it and check its hash:
+
+```bash
+export SURGEDESK_GRANITE="$PWD/models/granite/granite-3.3-2b-instruct-be-fixed.q8_0.gguf"
+sha256sum "$SURGEDESK_GRANITE"
+export SURGEDESK_TOP_N=3
+export SURGEDESK_SNAPSHOT=2017-08-29T22:30:00Z
+```
+
+The original conversion helper is `scripts/convert_granite.sh`. Its original-named BE artifact was not the working artifact used by the latest run; do not assume an arbitrary conversion reproduces the verified fixed file. Obtain that verified artifact or validate a compatible conversion separately. Large models are not distributed through this repository.
+
+To reproduce the non-Granite pipeline, run these commands **sequentially**, allowing each to finish:
+
+```bash
+python -m surgedesk.pipeline --stage data
+python -m surgedesk.pipeline --stage embed
+python -m surgedesk.pipeline --stage classifier
+python -m surgedesk.pipeline --stage tag
+python -m surgedesk.pipeline --stage ranker
+python -m surgedesk.pipeline --stage rank
+SURGEDESK_GENERATE_EXTRACTIONS=0 python -m surgedesk.pipeline --stage eval
+```
+
+Embedding can take substantial time on the small CPU allocation. Do not restart completed stages unnecessarily: embeddings, tags, ranked outputs, and briefings have caches. Classifier and ranker stages retrain when invoked. Back up runtime artifacts before a forced rebuild. Changes to masked embedding inputs require the full refresh described below; changed ranking feature semantics require ranker retraining even when the feature order is unchanged.
+
+The evaluation command above uses the default human reference-label mode; absent labels/predictions remain unavailable. To reproduce the recorded provisional AI-reference mode, provide the private draft label files and use `SURGEDESK_LABEL_SOURCE=ai SURGEDESK_GENERATE_EXTRACTIONS=0 python -m surgedesk.pipeline --stage eval`. That command does not launch Granite.
+
+An optional bounded CLI briefing run is:
+
+```bash
+SURGEDESK_TOP_N=3 python -m surgedesk.pipeline --stage brief
+```
+
+`bash run_all.sh` is the full runner, including the brief stage; it is not a lightweight way to reopen the dashboard. `FORCE=1 bash run_all.sh` forces the stages and should not be used for routine viewing. `bash run_all.sh --from rank` resumes the runner at ranking and continues through briefing/evaluation.
+
+Formal benchmarks are separate: `bash run_benchmark.sh`, on an idle VM with other kernels shut down. The runner sets the benchmark thread count and invokes uncached Granite measurements, so it can be slow. Do not use notebook probe timings or event-time surfacing statistics as formal compute-latency measurements. Missing benchmark files are not evidence of measured acceleration or throughput.
+
+Terminal environment exports do not update an already running Jupyter server or kernel. Set required overrides in the notebook's first controls cell, before importing `surgedesk.config`, and restart the kernel. Verify the selected model, event, and snapshot before deliberately generating new briefings.
+
+Notebook 03 caps the review at three incidents even when `SURGEDESK_TOP_N` is larger. It defaults to `SURGEDESK_TOP_N=3`, `RUN_SPEED_PROBE=False`, `RUN_EXTRACTION_EVAL=False`, and cached briefings reused. A smaller configured count is respected. It loads Granite only for an uncached call and uses the fixed BE model if present and no model override was supplied. With no grounded extraction fields, the pipeline skips sentence generation and uses the labeled template. Set `FORCE_BRIEFINGS=True` only to test new prompts deliberately. For the same smaller CLI workload use `SURGEDESK_TOP_N=3 python -m surgedesk.pipeline --stage brief`; the full CLI default in the frozen config remains unchanged. Notebook probes are development checks, not formal benchmark results. Larger briefing batches must be requested through the CLI; the notebook review stays capped. Extraction-evaluation batches remain an explicit optional choice.
 
 Cached review, dashboard display, and evaluation apply the current evidence checks without model calls. Historical references (relative to the configured demo event year), speculative counts, and unspecified rising tolls cannot establish a current affected-person count. A quoted responder or family reference may still identify who was affected. Locations remain unknown when the reports do not establish a current place; the event name is not a location substitute. List numbering is removed before sentence checking, and comma-separated counts are checked as complete numbers. These rules are conservative filters, not independent verification of the reports. After updating these checks, run notebook 03 with `FORCE_BRIEFINGS=False` to review saved results first; only regenerate deliberately to test the new prompts.
 
@@ -89,7 +177,7 @@ SURGEDESK_LABEL_SOURCE=ai SURGEDESK_GENERATE_EXTRACTIONS=0 python -m surgedesk.p
 
 Embeddings, classifier weights, and tagging can be reused for this ranking-only revision. Inspect the new `incident_review.csv` before another Granite run. New top incidents may be unbriefed; this is distinct from failed extraction. `rank_model_scores.jsonl` keeps base-model, priority-policy, and available legacy-model scores. `ranking_provenance.json` records the objective and input/model signature so changed inputs cannot silently reuse ranked output.
 
-All pitch measurements must come from [`evaluate.py`](surgedesk/evaluate.py) or [`benchmark.py`](surgedesk/benchmark.py). See the generated [results](docs/RESULTS.md) and [report](docs/REPORT.md). Development results are labelled **Development run, NOT LinuxONE**; unavailable measurements remain unavailable. Do not replace these with estimated claims.
+All reported measurements must come from [`evaluate.py`](surgedesk/evaluate.py) or [`benchmark.py`](surgedesk/benchmark.py). See the generated [results](docs/RESULTS.md). `docs/REPORT.md` is a separate team-authored report template and is not the source of measured results. Development results are labelled **Development run, NOT LinuxONE**; unavailable measurements remain unavailable. Do not replace these with estimated claims.
 
 After tagging, `make_label_sheet()` writes `data/labels/to_label.csv`; `make_purity_sheet()` writes `data/labels/purity_to_label.csv`. They preserve existing sheets unless explicitly forced. Humans save completed sheets as `hand_labels.csv` and `purity_labels.csv` in the same directory. Preserve `report_id` as plain text when exporting from a spreadsheet. Evaluation rejects scientific notation IDs, skips unfilled labels, and requests uncovered extraction predictions from Agent 3 when available.
 
@@ -142,13 +230,13 @@ When updating place matching, back up existing outputs, labels, and the ranker b
 
 ## Limitations
 
-The following list is reproduced from `PLAN.md` section 9. Its study size and hardware describe the plan; completed annotation counts and measured machine information are reported only in generated results.
+These limitations describe the current prototype. Measured values and reference-label provenance are recorded in [RESULTS.md](docs/RESULTS.md); planned annotations are not counted as completed validation.
 
 **Data**
 - HumAID is tweets from 2016 to 2019, not 911 calls or texts; English only.
 - HumAID is a sampled, de-duplicated research set (Harvey: ~9K tweets over 8 days), so incidents are smaller and more fragmented than a live feed would produce. The replay compresses time (1x = 12x real time).
 - Urgency is a proxy built from human humanitarian labels, not real dispatch priority or outcomes.
-- 100 hand-labeled reports from 4 labelers; no inter-rater agreement measured.
+- Independent team human validation is incomplete. Draft AI extraction/grouping references are provisional and do not establish independent human ground truth. Grouping labels with stale memberships are excluded; current purity is unavailable.
 - Only HumAID Set 1 is used.
 
 **Location**
@@ -159,7 +247,7 @@ The following list is reproduced from `PLAN.md` section 9. Its study size and ha
 - Classifier and ranker are trained on other disasters; performance shifts with disaster type and region.
 - Assistance text cues can miss slang, negation, time context, and indirect needs. The explicit priority policy and changed category target require independent operational review; proxy-metric gains do not establish better dispatch decisions.
 - Grouping thresholds were tuned by spot check, not a labeled benchmark; wrong merges and splits happen.
-- Granite 2B is small; it misses fields and misreads slang. Its confidence values are self-reported, not calibrated.
+- The latest bounded Granite review produced no grounded fields and used templates for every reviewed incident. Saved call logs show parsing failures in part of that sample. This does not establish useful model-written briefings or overall extraction accuracy. The model's confidence values are self-reported, not calibrated.
 - Grounding proves a claim traces to a report, not that the report is true. Misinformation passes through.
 
 **Fairness**
@@ -167,12 +255,12 @@ The following list is reproduced from `PLAN.md` section 9. Its study size and ha
 - Social media under-represents people without phones, internet, or power.
 
 **System**
-- 3 vCPU / 8 GB VM; Granite briefings are batched for the top incidents, not real time for every report.
+- The observed environment is a small LinuxONE CPU allocation; Granite is batched for selected incidents and can be slow. Hardware flags and installed libraries do not establish a measured acceleration benefit.
 - Not integrated with any dispatch system; not tested with real emergency staff; no authentication or high availability.
 
 
 ## Team and roles
 
-Person 1: integration/UI/evaluation, infrastructure, and LinuxONE runner. Person 2: data and tagging. Person 3: Granite conversion and grounded briefings. Person 4: grouping/ranking and the pitch/story. Public names and final role wording are pending Person 4.
+Person 1: integration/UI/evaluation, infrastructure, and LinuxONE runner. Person 2: data and tagging. Person 3: Granite conversion and grounded briefings. Person 4: grouping/ranking and the pitch/story. The repository uses person/agent labels to document implementation ownership.
 
 Built during the IBM Datathon 2026.
