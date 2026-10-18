@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import csv
 import json
 import math
 import os
@@ -131,6 +132,9 @@ def _evaluation_inputs(d, label_mode=None):
                  "baselines.py", "features.py", "group.py", "contracts.py", "stubs.py", "config.py", "textutil.py"):
         paths[f"code/{name}"] = config.PACKAGE_DIR / name
     result = {}
+    # An explicit review-snapshot override changes the review/fairness outputs
+    # even when source files and models are unchanged.
+    result["review_snapshot_override"] = os.environ.get("SURGEDESK_SNAPSHOT") or None
     for name, path in paths.items():
         if not path.is_file():
             result[name] = None
@@ -155,6 +159,8 @@ def evaluation_freshness(event=config.DEMO_EVENT, src_dir: Path | None = None) -
     # The saved label mode wins: opening notebook 05 must not silently switch
     # an AI evaluation back to the terminal's default human-label selection.
     current = _evaluation_inputs(d, recorded["label_mode"])
+    if not os.environ.get("SURGEDESK_SNAPSHOT"):
+        current["review_snapshot_override"] = recorded["inputs"].get("review_snapshot_override")
     changed = sorted(name for name in set(current) | set(recorded["inputs"])
                      if current.get(name) != recorded["inputs"].get(name))
     if hashlib.sha256((d / config.SUMMARY_FILE).read_bytes()).hexdigest() != recorded["summary_sha256"]:
@@ -180,6 +186,56 @@ def _hand_labels():
     if labels.report_id.duplicated().any():
         raise ValueError(f"{path}: duplicate report_id labels")
     return labels
+
+
+def audit_privacy_artifacts(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
+    """Read-only scan of shareable artifacts; never return matched private text.
+
+    Detects only contacts recognized by the shared masker. This cannot certify
+    anonymization; private names/addresses and unsupported formats may remain.
+    Raw reports are intentionally excluded: they are restricted source data.
+    """
+    d = Path(src_dir) if src_dir is not None else config.event_dir(event)
+    paths = [(f"event/{name}", d / name) for name in (
+        "incident_review.csv", config.BRIEFINGS_FILE, "extraction_preds.jsonl",
+        config.DECISIONS_FILE, config.LLM_LOG_FILE,
+    )]
+    paths.extend((f"labels/{p.name}", p) for p in sorted(config.LABELS_DIR.glob("*.csv")))
+    paths.extend((f"notebooks/{name}.ipynb", config.ROOT / "notebooks" / f"{name}.ipynb")
+                 for name in ("01_tag", "02_group_rank", "03_brief", "04_demo", "05_eval_benchmark"))
+
+    def matches(value):
+        if isinstance(value, str):
+            return int(mask_privacy(value) != value)
+        if isinstance(value, dict):
+            return sum(matches(v) for v in value.values())
+        if isinstance(value, list):
+            return sum(matches(v) for v in value)
+        return 0
+
+    findings, unreadable, checked = [], [], 0
+    for name, path in paths:
+        if not path.exists():
+            continue
+        checked += 1
+        try:
+            if path.suffix == ".csv":
+                with path.open(newline="", encoding="utf-8-sig") as stream:
+                    count = sum(matches(row) for row in csv.DictReader(stream))
+            elif path.suffix == ".ipynb":
+                notebook = fileio.read_json(path)
+                count = sum(matches(cell.get("outputs", [])) for cell in notebook.get("cells", []))
+            else:
+                count = sum(matches(row) for row in fileio.read_jsonl(path))
+        except (OSError, ValueError, TypeError) as exc:
+            # Decoder/backend error strings can echo private file contents.
+            unreadable.append({"artifact": name, "error": type(exc).__name__})
+            continue
+        if count:
+            findings.append({"artifact": name, "matching_strings": count})
+    return {"status": "needs_review" if findings or unreadable else "no_known_contact_matches" if checked else "no_artifacts",
+            "checked_files": checked, "findings": findings, "unreadable": unreadable,
+            "note": "Read-only contact-pattern scan, not an anonymity guarantee. Review names and private addresses manually. Existing files were not changed."}
 
 
 def make_label_sheet(event=config.DEMO_EVENT, n=config.LABEL_SAMPLE_N,
@@ -568,8 +624,9 @@ def _write_incident_review(d, event, incidents, reports, tags, briefs):
         if briefing:
             selected_briefs.append(briefing)
         status = "not_briefed" if briefing is None else "template_fallback" if briefing.used_fallback else "generated_checked"
-        grounded = {name: value["evidence"] for name, value in briefing.fields.items() if value["grounded"]} if briefing else {}
-        rejected = [{"text": s["text"], "reason": s["reject_reason"]} for s in briefing.sentences if not s["accepted"]] if briefing else []
+        grounded = {name: mask_privacy(value["evidence"]) for name, value in briefing.fields.items() if value["grounded"]} if briefing else {}
+        rejected = [{"text": mask_privacy(s["text"]), "reason": mask_privacy(s["reject_reason"] or "")}
+                    for s in briefing.sentences if not s["accepted"]] if briefing else []
         for rid in incident.report_ids:
             if rid not in by_report:
                 raise ValueError(f"Incident review: missing report {rid} referenced by {incident.incident_id} (owner: Agent 2)")
@@ -577,19 +634,19 @@ def _write_incident_review(d, event, incidents, reports, tags, briefs):
             score = model_scores.get((incident.incident_id, snap), {})
             cues = assistance_signals(report)
             rows.append(dict(incident_id=incident.incident_id, snapshot_time=snap, rank=incident.rank,
-                             score=incident.score, place=incident.place, county_fips=incident.county_fips,
+                             score=incident.score, place=mask_privacy(incident.place) if incident.place else incident.place, county_fips=incident.county_fips,
                              n_reports=len(incident.report_ids),
                              ranking_reasons="; ".join(feature_reason(k, incident.features) for k, value in incident.shap_top if value > 0),
-                             briefing_status=status, grounded_fields=mask_privacy(json.dumps(grounded)),
+                             briefing_status=status, grounded_fields=json.dumps(grounded),
                              briefing=mask_privacy(briefing.briefing) if briefing else "",
-                             rejected_sentences=mask_privacy(json.dumps(rejected)),
+                             rejected_sentences=json.dumps(rejected),
                              report_id=rid, timestamp=report.timestamp,
                              representative=rid in briefing.rep_report_ids if briefing else False,
                              pred_category=tagged.pred_category if tagged else None,
                              pred_conf=tagged.pred_conf if tagged else None, text=mask_privacy(report.text),
                              priority_band=("current_need_cues" if incident.features.get("share_current_assistance", 0) > 0 else "context") if "share_current_assistance" in incident.features else "legacy",
                              model_score=score.get("model_score"), legacy_model_score=score.get("legacy_model_score"),
-                             current_assistance_evidence=json.dumps(cues["evidence"]),
+                             current_assistance_evidence=json.dumps([mask_privacy(text) for text in cues["evidence"]]),
                              assistance_cue_in_window=cues["current_assistance"] and
                              parse_iso(snap) - parse_iso(report.timestamp) <= timedelta(hours=config.WINDOW_HOURS),
                              historical_or_speculative=cues["historical_or_speculative"], casualty_only=cues["casualty_only"]))
@@ -693,6 +750,7 @@ def run_all(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
     if briefs:
         briefs = require_module("brief").review_cached_briefings(briefs, incidents or [], reports or [])
     _write_incident_review(d, event, incidents, reports, tags, briefs)
+    _save(d, "privacy_audit.json", audit_privacy_artifacts(event, d))
     meta = fileio.read_json(config.RANKER_META_PATH) if config.RANKER_META_PATH.exists() else {}
     info = envcheck.collect()
     summary = {"event": event, "measured_on": {k: info[k] for k in ("arch", "cores", "ram_gb", "nnpa_flag")},

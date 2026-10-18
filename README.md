@@ -97,6 +97,35 @@ For a provisional AI reference review, put `ai_extraction_labels_DRAFT.csv` and 
 
 Ranking metrics average eligible snapshots; urgency is a proxy. Time to surface is measured from first report to first top-k appearance; never-surfaced incidents remain censored. Reports, samples, evidence, and review notes displayed by Agent 4 pass through the shared privacy masker. Outputs and labels are ignored by Git.
 
+### Contact masking and existing artifacts
+
+The shared masker redacts handles, URLs, and common North American phone formats, including optional country prefixes and extensions. It is not full anonymization: personal names, private street addresses, and unsupported international/obfuscated phone formats may remain. Review artifacts privately before sharing; Git ignore rules do not make an exported file anonymous.
+
+Evaluation writes `privacy_audit.json`. Notebook 05 also scans current label sheets, cached briefings/predictions, decision/model logs, review exports, and saved notebook outputs without modifying them. Run the same read-only scan from the repo root:
+
+```bash
+python -c "from surgedesk.evaluate import audit_privacy_artifacts; import json; print(json.dumps(audit_privacy_artifacts(), indent=2))"
+```
+
+The audit returns artifact names and counts, never the matching private text. `no_known_contact_matches` means only that the supported contact patterns did not match; it is not permission to publish source data or private addresses. Raw reports are deliberately excluded from the audit because they remain restricted source data. Inference through a local model is not an upload, but its inputs still pass through masking.
+
+Updating code does not scrub previously downloaded exports, labeled sheets, cached predictions, decisions, model logs, or notebook outputs. Keep those private. Back up human annotations before any deliberate edit; do not force-regenerate completed labels. Rerun evaluation to replace the review export, recheck cached briefings, and clear old notebook outputs before a fresh review. Recheck old predictions through evaluation and review any files flagged by the audit. No automatic scrub deletes or rewrites historical decisions or human work. New evaluations invalidate earlier provenance when the masker changes.
+
+A masking change also changes MiniLM inputs and text deduplication. For consistent fresh offline/live measurements, back up the full artifact chain, then run these stages **one at a time** on LinuxONE as Person 1:
+
+```bash
+python -m surgedesk.pipeline --stage embed --force
+python -m surgedesk.pipeline --stage classifier
+python -m surgedesk.pipeline --stage tag --force
+python -m surgedesk.pipeline --stage ranker
+python -m surgedesk.pipeline --stage rank --force
+SURGEDESK_SNAPSHOT=2017-08-29T22:30:00Z SURGEDESK_LABEL_SOURCE=ai SURGEDESK_GENERATE_EXTRACTIONS=0 python -m surgedesk.pipeline --stage eval
+```
+
+These commands reuse the raw reports and local model files; they do not redownload data or run Granite. The explicit review snapshot overrides a saved selection and must exist in the current incidents. Use it consistently for before/after review rather than choosing a favorable result. Notebook 05 retains the saved snapshot provenance when opened without an override, and detects an explicitly different override as stale.
+
+Inspect the new masked review and both-target comparison before a bounded Granite run. Only after the revised cards and privacy checks are approved, use notebook 03's three-incident controls, optional speed/extraction batches off, and the verified fixed BE model. A deliberate prompt-quality refresh may require force regeneration for those three incidents; reset force afterward. Rerun evaluation after briefings change. Run the formal benchmark separately on an idle VM with current artifacts. Do not claim new quality or performance until Person 1 returns those measurements.
+
 When updating place matching, back up existing outputs, labels, and the ranker before running `--stage tag --force`, `--stage ranker`, and `--stage rank --force` in that order. Embeddings and classifier weights can be reused for a place-only fix. Regrouping can reuse incident IDs with different members: the UI hides briefings with mismatched membership cache keys, and purity evaluation excludes groups whose labeled member sets no longer match, reporting `purity_rows_stale`. Review or regenerate purity sheets after regrouping. Cached briefings are rechecked against the current rejection rules without new model calls when the brief stage runs; prompt changes require `--stage brief --force` to generate new text. Use the fixed GGUF via `SURGEDESK_GRANITE` in both terminal and notebook environments. Recompute evaluation after regenerating downstream outputs; previous geographic/fairness results do not validate the changed implementation. Literal quote checks and conservative context rules do not establish full semantic correctness, and county assignment remains a nearest-centroid approximation.
 
 ## Data sources and licenses

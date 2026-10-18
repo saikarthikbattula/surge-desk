@@ -86,21 +86,37 @@ ASSISTANCE_SCORE_MIN = 0.6
 CONTEXT_SCORE_MAX = 0.25
 CONTEXT_ADJUSTED_MAX = 0.5
 ASSISTANCE_CACHE_SIZE = 25000
+# Named groups describe cue policy only; they add no Incident/schema fields.
+# Resources without a request predicate are context, as are broad help appeals.
+ASSISTANCE_RESOURCE = (
+    r"(?:rescue|boats?|food|(?:drinking )?water|shelter|medicines?|medications?|"
+    r"oxygen|insulin|nebulizers?|inhalers?|ambulances?|medical (?:care|attention|help)|"
+    r"supplies|volunteers|evacuation|transport(?:ation)?|fuel|gas|gasoline|"
+    r"clothes|clothing|bedding|blankets|diapers|personal[- ]care goods|hygiene (?:kits|products))"
+)
 ASSISTANCE_PATTERNS = (
-    r"\b(?:sos|mayday)\b|^\s*#?help(?:\s+(?:now|please|us|me))?\s*$",
-    r"\bplease\s+(?:help|send|rescue|bring)\b",
-    r"\b(?:need|needs|needing|request|requesting|requests|asking for|looking for)\s+(?:\w+\s+){0,2}(?:help|assistance|aid|rescue|boat|boats|food|water|shelter|medicine|medication|oxygen|insulin|supplies|volunteers|evacuation|transport|ambulance)\b",
-    r"\bneeds?\s+to\s+be\s+(?:rescued|evacuated)\b|\b(?:awaiting|waiting for)\s+(?:help|rescue|evacuation)\b",
-    r"\b(?:help|rescue)\s+(?:me|us|my|our|people|residents|families|family)\b",
-    r"\b(?:can|could)\s+(?:anyone|someone|you)\s+(?:help|rescue|send|bring)\b",
-    r"\b(?:anyone|someone)\s+(?:have|got|with)\s+(?:\w+\s+){0,2}(?:boat|water|food|shelter|transport|medicine)\b",
-    r"\b(?:trapped|stranded|stuck)\b",
-    r"\b(?:not|never)\s+(?:yet\s+)?rescued(?:\s+yet)?\b",
-    r"\b(?:missing|searching for)\s+(?:\w+\s+){0,3}(?:person|people|child|children|man|woman|boy|girl|teen|neighbor|family|mother|father|son|daughter)\b",
-    r"\b(?:without|out of|running out of)\s+(?:drinking water|food|water|medicine|oxygen|insulin)\b",
-    r"\b(?:help|rescue|boat|boats|food|water|shelter|supplies|volunteers)\s+(?:is |are )?(?:needed|required|urgently needed)\b",
+    r"(?P<context>\b(?:if|unless|whenever)\s+(?:you|anyone|someone|we|they|people|residents|families)\b)",
+    r"(?P<context>\b(?:how|ways)\s+to\s+help\b|\b(?:fundraiser|fundraising|medical fund)\b)",
+    r"(?P<specific>\b(?:sos|mayday)\b|^\s*#?help(?:\s+(?:now|please|us|me))?\s*$|"
+    r"\bneeds?\s+to\s+be\s+(?:rescued|evacuated)\b|\b(?:awaiting|waiting for)\s+(?:help|rescue|evacuation)\b|"
+    r"\b(?:trapped|stranded|stuck)\b|\b(?:not|never)\s+(?:yet\s+)?rescued(?:\s+yet)?\b|"
+    r"\b(?:missing|searching for)\s+(?:\w+\s+){0,3}(?:person|people|child|children|man|woman|boy|girl|teen|neighbor|family|mother|father|son|daughter)\b|"
+    r"\b(?:child|person|man|woman|teen|girl|boy|neighbor|mother|father|son|daughter)\s+(?:is|remains)\s+missing\b)",
+    r"(?P<specific>\b(?:i|we|my\s+(?:family|neighbor|friend|mother|father|child|son|daughter)|"
+    r"our\s+(?:family|neighbors|children)|(?:a|an|one|the)\s+(?:(?:elderly|older|injured|disabled)\s+)?"
+    r"(?:person|resident|woman|man|child|family|neighbor))\s+"
+    r"(?:(?:still|urgently|desperately|currently)\s+){0,2}(?:need|needs|require|requires)\s+(?:help|assistance|aid)\b|"
+    r"\b(?:please\s+)?(?:help|rescue)\s+(?:me|us|my\s+(?:neighbor|family|friend|child)|our\s+(?:family|children))\b|"
+    r"\b(?:can|could)\s+(?:anyone|someone|you)\s+help\s+(?:me|us|my\s+\w+|our\s+\w+)\b)",
+    rf"(?P<resource>\b(?:need|needs|needing|request|requesting|requests|require|requires|asking for|looking for)\s+"
+    rf"(?:\w+[\s-]+){{0,4}}{ASSISTANCE_RESOURCE}\b|"
+    rf"\b(?:please\s+)?(?:send|bring|deliver|donate)\s+(?:\w+\s+){{0,2}}{ASSISTANCE_RESOURCE}\b|"
+    rf"\b(?:anyone|someone)\s+(?:have|got|with)\s+(?:\w+\s+){{0,2}}{ASSISTANCE_RESOURCE}\b|"
+    rf"\b(?:without|out of|running out of)\s+{ASSISTANCE_RESOURCE}\b|"
+    rf"\b{ASSISTANCE_RESOURCE}\s+(?:is |are )?(?:needed|required|urgently needed)\b)",
 )
 ASSISTANCE_NEGATION = (
+    r"\b(?:nobody|no one)\s+(?:is |remains )?(?:trapped|stranded|stuck|missing)\b|"
     r"\b(?:no longer|not|never|don't|doesn't|do not|does not|didn't|did not)\s+"
     r"(?:(?:really|currently|still|actually|urgently)\s+){0,2}(?:need|needs|trapped|stranded|stuck|missing|require|help|rescue)\b|"
     r"(?<!not )(?<!never )(?<!yet )(?<!n't )\b(?:was rescued|were rescued|is rescued|are rescued|been rescued|already rescued|"
@@ -108,7 +124,7 @@ ASSISTANCE_NEGATION = (
     r"no (?:help|rescue|supplies) needed|found (?:alive|safe|unharmed))\b|"
     r"\bmissing (?:child|person|man|woman|teen|girl|boy)\s+(?:was |is |has been )?found\b"
 )
-ASSISTANCE_SPECULATION = r"\b(?:might|would|forecast\w*|predict\w*|expected|projected)\b|\b(?:could|may)\s+(?:be|cause|affect|displace|kill|injure|reach|rise|approach)\b"
+ASSISTANCE_SPECULATION = r"\b(?:might|would|forecast\w*|predict\w*|expected|projected)\b|\b(?:could|may)\s+(?:be|leave|need|require|become|cause|affect|displace|kill|injure|reach|rise|approach)\b"
 ASSISTANCE_HISTORY = r"\b(?:historical|historically|last year|years? ago|previous (?:storm|hurricane|flood)|back in)\b"
 CASUALTY_PATTERN = r"\b(?:dead|death|deaths|died|killed|casualties|death toll)\b"
 

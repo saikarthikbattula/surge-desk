@@ -18,7 +18,8 @@ import pandas as pd
 
 from surgedesk import benchmark, config, evaluate, fileio, ui
 from surgedesk.contracts import BRIEF_FIELDS, Briefing, Decision, Incident, Report, empty_fields
-from surgedesk.pipeline import StageUnavailable
+from surgedesk.pipeline import StageUnavailable, pick_snapshot
+from surgedesk.textutil import mask_privacy
 from surgedesk.testing import fixture_dir, load_fixture
 
 
@@ -149,6 +150,124 @@ def test_decision_logging():
         assert len(fileio.read_jsonl(d / config.DECISIONS_FILE, Decision)) == 1
         ui._log_decision(d, incident, "override", new_rank=2)
         assert fileio.validate_file(d / config.DECISIONS_FILE) == 2
+
+
+def test_phone_privacy_formats_and_numeric_identifiers():
+    # Fictional NANP contacts only; no production report text or phone numbers.
+    phones = ["202-555-0142", "(202) 555-0142", "202 555 0142", "202.555.0142",
+              "2025550142", "+1 (202) 555-0142", "1-202-555-0142",
+              "202-555-0142 ext. 42", "202-555-0142 extension 42", "202-555-0142 x42",
+              "202-555-0142 #42"]
+    for phone in phones:
+        assert mask_privacy(f"Contact {phone}, please.") == "Contact <phone>, please.", phone
+    ordinary = "902651334989684736 77049 77049-1234 2017-08-29T22:30:00Z 12,000 people 3.14 42"
+    assert mask_privacy(ordinary) == ordinary
+    masked = mask_privacy("@test Contact 202-555-0142 https://example.test/2025550142")
+    assert masked == "@user Contact <phone> <url>"
+    assert mask_privacy(masked) == masked
+
+
+def test_phone_privacy_across_exports_ui_decisions_and_model_inputs():
+    from surgedesk import brief
+    phone = "202-555-0142"
+    source = f"Please send water. Contact {phone} or @test https://example.test"
+    with tempfile.TemporaryDirectory() as root:
+        root = Path(root)
+        d = _copy(root)
+        reports = [replace(r, text=source) for r in fileio.read_jsonl(d / config.REPORTS_FILE, Report)]
+        tags = fileio.read_jsonl(d / config.TAGGED_FILE, evaluate.Tagged)
+        incidents = fileio.read_jsonl(d / config.INCIDENTS_FILE, Incident)
+        fileio.write_jsonl(d / config.REPORTS_FILE, reports)
+        briefs = fileio.read_jsonl(d / config.BRIEFINGS_FILE, Briefing)
+        fields = empty_fields()
+        fields["need"] = dict(value=f"Call {phone}", evidence=f"Call {phone}", grounded=True, confidence=1.0)
+        briefs[0] = replace(briefs[0], fields=fields, briefing=f"Call {phone}", sentences=[
+            dict(text=f"Please call {phone}", tags=["need"], accepted=False, reject_reason=f"unsupported {phone}")])
+        fileio.write_jsonl(d / config.BRIEFINGS_FILE, briefs)
+        with patch("surgedesk.features.assistance_signals", return_value={
+            "current_assistance": True, "historical_or_speculative": False,
+            "casualty_only": False, "evidence": [source]}):
+            evaluate._write_incident_review(d, config.FIXTURE_EVENT, incidents, reports, tags, briefs)
+        review = (d / "incident_review.csv").read_text()
+        assert phone not in review and "<phone>" in review
+        frame = pd.read_csv(d / "incident_review.csv", dtype=str, keep_default_na=False)
+        assert set(frame.report_id) <= {r.report_id for r in reports}
+        assert all(phone not in json.dumps(json.loads(value)) for value in frame.grounded_fields)
+        html = ui.render_html(config.FIXTURE_EVENT, stub=True, src_dir=d)
+        assert phone not in html and "&lt;phone&gt;" in html
+        assert phone not in ui.load_demo(config.FIXTURE_EVENT, src_dir=d).texts[reports[0].report_id]
+        decision = ui._log_decision(d, incidents[0], "accept", note=f"Contact {phone}", reviewer=f"Test {phone}")
+        assert phone not in json.dumps(decision.to_dict())
+        _fixture_groups(d)
+        with patch.object(config, "LABELS_DIR", root / "labels"):
+            actionable = sum(t.is_actionable for t in tags)
+            label = evaluate.make_label_sheet(config.FIXTURE_EVENT, n=len(reports), n_actionable=actionable, src_dir=d)
+            purity = evaluate.make_purity_sheet(config.FIXTURE_EVENT, src_dir=d)
+            assert phone not in label.read_text() and "<phone>" in label.read_text()
+            assert phone not in purity.read_text() and "<phone>" in purity.read_text()
+
+        class CaptureLLM:
+            def chat_json(self, system, user, schema, max_tokens):
+                assert phone not in user and "<phone>" in user
+                return {"need": {"evidence": "Please send water.", "confidence": 1.0}}, {}
+
+            def chat_text(self, system, user, max_tokens):
+                assert phone not in user
+                return "Please send water. [need]", {}
+
+        grounded, _ = brief.extract_fields(CaptureLLM(), reports[:1])
+        assert grounded["need"]["grounded"]
+        checked, _ = brief.write_briefing(CaptureLLM(), incidents[0], grounded)
+        assert checked[0]["accepted"]
+        # Old evidence containing a raw phone is rechecked against new masked
+        # sources and cannot remain marked grounded. Persisted files stay private.
+        old = replace(briefs[0], rep_report_ids=incidents[0].report_ids[:1])
+        rechecked = brief._recheck_cached(old, incidents[0], {r.report_id: r for r in reports})
+        assert not rechecked.fields["need"]["grounded"]
+
+
+def test_privacy_audit_is_read_only_and_never_echoes_contact_values():
+    phone = "202-555-0142"
+    with tempfile.TemporaryDirectory() as root:
+        root = Path(root)
+        d = _copy(root)
+        labels = root / "labels"
+        labels.mkdir()
+        old_label = labels / "hand_labels.csv"
+        old_label.write_text(f'report_id,text,labeler\n902651334989684736,"Call {phone}",P1\n')
+        fileio.write_jsonl(d / config.LLM_LOG_FILE, [{"error": f"Bad input {phone}"}])
+        # Decoder errors are reported only by type, not their private message.
+        (d / "extraction_preds.jsonl").write_text('PRIVATE_INVALID_JSON ' + phone)
+        notebook = root / "notebooks" / "03_brief.ipynb"
+        fileio.write_json(notebook, {"cells": [{"source": "source is not audited", "outputs": [
+            {"text": [f"Call {phone}"]}]}]})
+        before = {p: p.read_bytes() for p in (old_label, d / config.LLM_LOG_FILE, notebook)}
+        with patch.object(config, "LABELS_DIR", labels), patch.object(config, "ROOT", root):
+            result = evaluate.audit_privacy_artifacts(config.FIXTURE_EVENT, d)
+            assert result["status"] == "needs_review"
+            assert {f["artifact"] for f in result["findings"]} >= {
+                "labels/hand_labels.csv", "event/llm_calls.jsonl", "notebooks/03_brief.ipynb"}
+            assert result["unreadable"] == [{"artifact": "event/extraction_preds.jsonl", "error": "JSONDecodeError"}]
+        assert phone not in json.dumps(result) and "PRIVATE_INVALID_JSON" not in json.dumps(result)
+        assert all(p.read_bytes() == content for p, content in before.items())
+
+
+def test_explicit_review_snapshot_overrides_saved_choice_and_is_validated():
+    incidents = load_fixture(config.INCIDENTS_FILE, Incident)
+    snapshots = sorted({i.snapshot_time for i in incidents})
+    with tempfile.TemporaryDirectory() as root:
+        d = Path(root)
+        (d / "demo_snapshot.txt").write_text(snapshots[-1])
+        with patch.dict(os.environ, {"SURGEDESK_SNAPSHOT": snapshots[0]}):
+            assert pick_snapshot(incidents, d) == snapshots[0]
+            assert pick_snapshot(incidents, d, fixture=True) == snapshots[-1]
+        with patch.dict(os.environ, {"SURGEDESK_SNAPSHOT": "not-a-snapshot"}):
+            try:
+                pick_snapshot(incidents, d)
+            except ValueError as exc:
+                assert "absent" in str(exc)
+            else:
+                raise AssertionError("Invalid explicit snapshot must fail clearly")
 
 
 def test_summary_keys_on_fixture():

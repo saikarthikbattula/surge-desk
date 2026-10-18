@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import sys
 import time
 
@@ -36,9 +37,10 @@ def pick_snapshot(incidents: list[Incident], src_dir, fixture: bool = False) -> 
     snapshots = sorted({i.snapshot_time for i in incidents})
     if not snapshots:
         raise ValueError("No incident snapshots available; run stage rank first")
-    snap = path.read_text().strip() if path.exists() else (
+    requested = os.environ.get("SURGEDESK_SNAPSHOT") if not fixture else None
+    snap = requested or (path.read_text().strip() if path.exists() else (
         snapshots[-1] if fixture else require_module("rank").pick_demo_snapshot(incidents)
-    )
+    ))
     if snap not in snapshots:
         raise ValueError(f"Demo snapshot {snap!r} is absent from incidents.jsonl")
     return snap
@@ -112,7 +114,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{stage}] done in {time.monotonic() - start:.3f}s")
         return 0
     except Exception as exc:
-        message = " ".join(str(exc).splitlines())
+        from .textutil import mask_privacy
+        message = mask_privacy(" ".join(str(exc).splitlines()))
         print(f"[{stage}] failed (owner: Agent {owner}): {message}", file=sys.stderr)
         return 1
 

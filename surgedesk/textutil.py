@@ -11,6 +11,16 @@ TWITTER_EPOCH_MS = 1288834974657  # snowflake epoch (Nov 4, 2010)
 
 _HANDLE = re.compile(r"@\w{1,30}")
 _URL = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+# Common North American phone formats; digit/word boundaries preserve IDs,
+# dates and ZIP codes. This is contact redaction, not full anonymization.
+_PHONE = re.compile(
+    r"(?<![\w])(?:\+?1[ .-]?)?"
+    r"(?:\([2-9]\d{2}\)[ .-]?|[2-9]\d{2}[ .-]?)"
+    r"[2-9]\d{2}[ .-]?\d{4}"
+    r"(?:[ \t]*(?:ext\.?|extension|x|\#)[ \t]*\d{1,6})?(?![\w])",
+    re.IGNORECASE,
+)
+
 _WS = re.compile(r"\s+")
 _WORD = re.compile(r"[a-z0-9']+")
 
@@ -61,10 +71,14 @@ def minutes_between(a: datetime, b: datetime) -> float:
 
 # --------------------------------------------------------------------------- text
 def mask_privacy(text: str) -> str:
-    """Replace @handles with @user and URLs with <url>. Use for anything displayed or recorded."""
+    """Mask handles, URLs and common North American phone numbers.
+
+    Not full anonymization: names, addresses and unfamiliar phone formats may
+    remain. Review private artifacts before sharing; existing files are not
+    rewritten by updating this helper."""
     text = _URL.sub("<url>", text)
     text = _HANDLE.sub("@user", text)
-    return text
+    return _PHONE.sub("<phone>", text)
 
 
 def normalize_ws(text: str) -> str:
