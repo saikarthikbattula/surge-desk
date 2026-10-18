@@ -1,67 +1,74 @@
 # SurgeDesk: Written Report
 
-IBM Datathon 2026 · Theme 1: Real-Time AI for Critical Decisions · Team: [TEAM NAME]
+**IBM Datathon 2026 · Theme 1: Real-Time AI for Critical Decisions**
 
-> Template owned by Person 4. Replace every [BRACKET]. Every number must come from `docs/RESULTS.md` (generated on LinuxONE). Target length: about 2 pages.
+**Team identity:** registered team name and member names have not been supplied; implementation roles are recorded below.
 
-## 1. Problem and beneficiaries
-[2 to 3 sentences on the disaster report flood at small county emergency offices.]
-[Sourced statistic, with citation: Author/Agency, title, year, URL.]
+## Problem, beneficiaries, and purpose
 
-## 2. What SurgeDesk does
-SurgeDesk turns a stream of disaster reports into a short, ranked list of incidents, each with quoted evidence a coordinator can verify. It recommends; a human decides, and every decision is logged.
+Disaster coordinators must separate specific requests from repeated headlines, appeals, offers, and incomplete location descriptions. SurgeDesk is a research prototype for reviewing that information, with local emergency-management coordinators as intended users and disaster-affected residents as potential beneficiaries.
 
-## 3. How it works
-| Stage | What it does | Technology |
+For scale, the National Hurricane Center's [Hurricane Harvey report](https://www.nhc.noaa.gov/data/tcr/AL092017_Harvey.pdf) estimated that approximately **40,000 flood victims** were evacuated to or sheltered across Texas and Louisiana. The figure is also recorded in an [official Senate resolution citing NHC](https://www.cassidy.senate.gov/newsroom/press-releases/cassidy-kennedy-cruz-cornyn-introduce-resolution-recognizing-the-first-anniversary-of-hurricane-harvey/). This is historical population context, not a claim that SurgeDesk served these people or improved their outcomes.
+
+The intended value is a reviewable incident queue: inspect member reports, understand the model and policy contributions, adjust the vulnerability weighting, and record a human decision. SurgeDesk does not dispatch assistance.
+
+## Technical design and LinuxONE implementation
+
+| Stage | Implementation | Role |
 |---|---|---|
-| 1. Tag | Embeds and classifies every report; matches places to counties; flags vulnerable people | PyTorch (MiniLM embeddings), scikit-learn classifier, Census Gazetteer |
-| 2. Group | Merges reports about the same incident in real time | Online clustering (text similarity + place + time window) |
-| 3. Rank | Scores every open incident and explains the score | XGBoost + built-in SHAP contributions, CDC SVI |
-| 4. Brief | Extracts facts with exact quotes and writes a short briefing; rejects unsupported sentences | IBM Granite 3.3 2B, converted by us to big-endian GGUF, llama.cpp |
-| 5. Review | Cards, fairness slider, accept/override/dismiss with a decision log | Jupyter + ipywidgets |
+| Tag | Local MiniLM in PyTorch, scikit-learn classifier, Census place/county lookup, vulnerable-person terms | Embed and categorize reports and attach supported geography |
+| Group | Online text similarity with location and time constraints | Collect related reports into incidents |
+| Rank | XGBoost, feature contributions, current-assistance priority bands, CDC county SVI adjustment | Order incidents for review and expose the scoring policy |
+| Brief | IBM Granite 3.3 2B Instruct, team-converted fixed big-endian Q8_0 GGUF, llama.cpp | Attempt literal evidence extraction and short briefings; use labeled templates on failure |
+| Review | Jupyter, ipywidgets, historical replay, Accept/Override/Dismiss, validated append-only decisions | Keep the coordinator in control |
 
-**Why the design fits real time:** cheap models handle every report; Granite only reads the top incidents.
+PyTorch handles embeddings and XGBoost handles ranking. Granite does not determine the ranking; its selected-incident work is separated from the streaming tagging/ranking path. This is an architectural choice, not a claim of measured real-time latency.
 
-## 4. Running on IBM LinuxONE
-- Our own Docker image built on IBM's s390x JupyterLab image; data and models mounted at runtime.
-- Granite 3.3 2B converted by us to a big-endian Q8_0 GGUF for LinuxONE.
-- Telum / NNPA: [what we measured, or "zDNN-enabled llama.cpp; no comparison measured"].
-- Privacy: reports never leave the machine; no external APIs at runtime.
+The human operator ran the real workflow in IBM's existing Docker JupyterLab container on **s390x LinuxONE with 3 vCPU and approximately 8 GB RAM**. The replay, real-data cards, lambda changes, and decision logging were exercised. A custom Dockerfile is supplied, but the tested deployment was the existing IBM container. NNPA/zDNN availability was observed; accelerated model execution or hardware speedup was not demonstrated. Models and inference data are local, with no external model API calls at runtime.
 
-## 5. Data
-- HumAID Set 1 (QCRI): [N] human-labeled tweets from [K] disasters, 2016 to 2019. Demo/test event: [EVENT], never used for training.
-- CDC/ATSDR Social Vulnerability Index ([YEAR], county level); US Census Gazetteer ([YEAR]).
-- Urgency is a documented proxy: an incident is urgent if any of its reports carries a human label of requests/urgent needs, injured/dead, or missing/found.
-- [100] reports hand-labeled by our team to evaluate Granite's extraction.
+## Data, relevance definition, and evaluation
 
-## 6. Results (held-out event, measured on LinuxONE)
-| Metric | SurgeDesk | FIFO | Volume | Keyword |
-|---|---|---|---|---|
-| Median minutes to surface urgent incidents | [ ] | [ ] | [ ] | [ ] |
-| Share of urgent incidents surfaced in top 10 | [ ] | [ ] | [ ] | [ ] |
-| Precision@10 (mean over snapshots) | [ ] | [ ] | [ ] | [ ] |
+HumAID Set 1 supplies historical English disaster posts and human category labels. Hurricane Harvey is the held-out demo event and is excluded from model training. Census Gazetteer names support place matching; county SVI provides the optional vulnerability adjustment. Real data, models, and private labels are excluded from Git; the committed fixtures are synthetic.
 
-- Classifier macro-F1 on the held-out event: [ ]
-- Granite extraction match rate by field: [ ]; JSON valid rate: [ ]; fields grounded: [ ]; briefing sentences accepted: [ ]
-- Grouping: [N] incidents from [M] actionable reports; purity on 20 checked incidents: [ ]
-- Stream latency (p95) at 1x / 5x / 20x: [ ]; Granite seconds per incident: [ ]
-- Fairness: at λ = [ ], high-SVI share of the top 10 moves from [ ] to [ ], precision@10 from [ ] to [ ]
+The current assistance target marks an incident relevant when a member report's human label is requests/urgent needs or missing/found people. Injury/death news alone is not positive under this target. These categories are **proxies**, not independent confirmation of a specific unresolved emergency. Gold labels are training/evaluation targets, never inference features. Priority bands use text cues and model outputs; scores are not calibrated emergency probabilities.
 
-## 7. Responsible AI
-- Human in the loop: SurgeDesk never dispatches; every decision is logged.
-- Grounding: every displayed fact is an exact quote; unsupported briefing sentences are rejected and shown as rejected.
-- Fairness: the SVI slider makes the vulnerability tradeoff explicit; we don't claim it proves fairness.
-- Privacy: handles and URLs masked in all displays; raw data never committed.
+The evaluation used **9,112 Harvey reports**, of which **7,539** were tagged actionable, forming **6,779 incidents**. Classifier macro-F1 was **0.588** on Harvey. Ranker development AUC was **0.934** on training-event development data; this is separate from held-out ranking quality.
 
-## 8. Limitations
-[Copy the top items from PLAN.md section 9, plus 2 concrete failure cases from Person 3.]
+## Measured results
 
-## 9. Team
-| Person | Role | Agent driven |
+The following values are rounded from the committed, VM-generated [RESULTS.md](RESULTS.md), produced by `surgedesk.evaluate`.
+
+| Method | Precision@10 | Recall@10 | NDCG@10 | Median minutes to surface | Share surfaced |
+|---|---:|---:|---:|---:|---:|
+| SurgeDesk | 33.3% | 36.9% | 0.474 | 21.9 | 31.7% |
+| FIFO | 10.7% | 19.9% | 0.208 | 358.6 | 10.1% |
+| Volume | 13.3% | 20.7% | 0.245 | 95.5 | 6.5% |
+| Keyword | 25.3% | 34.0% | 0.412 | 290.3 | 27.3% |
+
+Precision, recall, and NDCG are averaged over eligible snapshots with positive relevance and k capped by incident count. Time-to-surface is historical event time, not inference latency or emergency response time. Its median includes surfaced incidents only; share surfaced includes those never reaching top-k. SurgeDesk leads the listed baselines on the current assistance-category ranking target, while still missing or misprioritizing reports. The archived legacy model performs better on the separate older broad target; the full same-incident comparison is in RESULTS.md.
+
+At the selected snapshot, changing lambda from **0** to **0.25** changed high-SVI representation in top-k from **20%** to **50%**, while category-proxy precision changed from **50%** to **70%**. This is a snapshot-specific policy tradeoff, not proof of fairer outcomes. Context incidents remain below current-assistance incidents under the band policy.
+
+The latest **3-incident Granite review grounded no fields and used templates for every incident**. No briefing sentences were generated, so sentence acceptance is unavailable rather than zero percent. Saved call logs identify JSON parsing failures in part of the sample; useful Granite extraction has not been demonstrated. Extraction agreement and current grouping purity remain unavailable. Draft AI references are provisional, human validation is incomplete, and stale grouping labels are excluded. Formal current stream-latency and Granite-runtime benchmarks are not reported.
+
+## Responsible AI and limitations
+
+- **Human authority:** all recommendations require review. Decisions are logged; no dispatch integration or emergency-staff validation exists.
+- **Traceability:** extracted fields require literal source evidence and generated sentences face conservative checks. Quote support does not prove a report true, and the guards can reject valid paraphrases. Templates remain explicitly labeled.
+- **Ranking errors:** the review still includes political commentary phrased as requests, volunteer/medicine offers, and conditional rescue directions among highly ranked items. Category precision does not measure dispatch usefulness.
+- **Location and grouping:** geography often remains unknown; the Gazetteer cannot resolve street/ZIP-only text. Place-to-county assignment uses approximate same-state centroids. Singleton share is **96.8%**; fragmentation and unavailable purity limit confidence in incident grouping.
+- **Privacy:** handles, URLs, and common North American phone formats are masked. Names, addresses, unusual contacts, and older saved artifacts can remain sensitive. Raw reports and private label sheets must not be published.
+- **Coverage and fairness:** historical sampled social media is not a complete emergency feed; people without connectivity are underrepresented. County SVI does not measure individual vulnerability, and no outcome-based fairness claim is supported.
+
+Further work should distinguish specific needs from offers/commentary, validate geography and grouping with independent reviewers, diagnose bounded JSON-generation failures, and measure runtime under a controlled workload. These remain research tasks rather than completed benefits.
+
+## Team and reproducibility
+
+| Human driver | Contribution | Coding-agent responsibility |
 |---|---|---|
-| [Name] | Infra lead, LinuxONE runner | Agent 4: integration, UI, evaluation |
-| [Name] | Data | Agent 1: data + tagging |
-| [Name] | Model (Granite) | Agent 3: briefings |
-| [Name] | Story, video, report | Agent 2: grouping + ranking |
+| Person 1 | Infrastructure, LinuxONE execution, integration review, UI, evaluation | Agent 4: integration/UI/evaluation/benchmark |
+| Person 2 | Data and MiniLM preparation, tagging/location review | Agent 1: data, embedding, tagging, geography |
+| Person 3 | Granite conversion and model-quality work | Agent 3: LLM adapter, extraction, grounding, briefings |
+| Person 4 | Grouping/ranking, story and presentation coordination | Agent 2: grouping, features, ranking, fairness, baselines |
 
-All code was written during the datathon by our team and our coding agents.
+The team used coding agents for implementation and humans for coordination, review, and LinuxONE runs. See [README.md](../README.md) for fixture and real-data run instructions, artifact requirements, model checksum, and cache behavior. Only the verified evaluation and demonstrated workflow are claimed here; template outputs are not presented as successful model-written briefings.
