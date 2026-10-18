@@ -1,4 +1,9 @@
-"""Local Gazetteer matching and county SVI lookup (Agent 1)."""
+"""Offline place/county name matching and county SVI lookup (Agent 1).
+
+The Gazetteer contains names and centroids, not streets or ZIP crosswalks.
+Place counties are approximate nearest-centroid assignments within the same
+state; county-name matches use the county's own GEOID. Neither is a geocoder.
+"""
 from __future__ import annotations
 
 import math
@@ -28,6 +33,12 @@ def _distance(lat1, lon1, lat2, lon2):
     p1, p2 = math.radians(lat1), math.radians(lat2)
     a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
     return 2 * math.asin(math.sqrt(min(1.0, a)))
+
+
+def _name_key(text):
+    # Use the same punctuation boundaries for Gazetteer names and report text:
+    # e.g. "St. Louis" and "Winston-Salem" must remain whole name candidates.
+    return " ".join(re.findall(r"[a-z0-9']+", text.lower()))
 
 
 class Gazetteer:
@@ -72,25 +83,57 @@ class Gazetteer:
 
 
 class PlaceMatcher:
+    """Match explicit names in event states; never infer from event or ZIP.
+
+    Hashtags split CamelCase and acronym boundaries. Names are scanned longest
+    first, deduplicated in text order, with the first hit supplying the county.
+    Unqualified duplicate names retain the Gazetteer's largest-land-area rule;
+    a following state selects that state's index. Out-of-event full state names
+    or uppercase postal abbreviations reject a candidate, rather than silently
+    substituting an event-state namesake. Event-state abbreviations also retain
+    their historical case-insensitive behavior.
+
+    Common-word single-token places need a state qualifier. The event's storm
+    name also needs one, and names immediately following a storm type are always
+    suppressed. Unsupported streets/ZIPs and events with no states stay unknown.
+    """
     def __init__(self, event: str, gazetteer: Gazetteer | None = None):
         self.states = config.states_for_event(event)
         self._gazetteer = (gazetteer or Gazetteer()) if self.states else None
-        self.index = self._gazetteer.place_index(self.states) if self._gazetteer else {}
+        self.index = self._index(self.states) if self._gazetteer else {}
+        self._widths = sorted({len(key.split()) for key in self.index}, reverse=True)
         self._state_indexes = {}
         self.qualifiers = {s.lower() for s in self.states} | {_STATE_NAMES[s] for s in self.states if s in _STATE_NAMES}
         self._qualifier_states = {name: state for state in self.states
                                   for name in (state.lower(), _STATE_NAMES.get(state, state.lower()))}
+        self._qualifier_states.update({name: state for state, name in _STATE_NAMES.items()})
         storm = re.fullmatch(r"(?:hurricane|cyclone|typhoon|tropical_storm)_(.+)_\d{4}", event)
-        self._storm_name = storm[1].replace("_", " ") if storm else None
+        self._storm_name = _name_key(storm[1].replace("_", " ")) if storm else None
+
+    def _index(self, states):
+        return {_name_key(key): value for key, value in self._gazetteer.place_index(states).items()}
+
+    def _following_state(self, tokens, original_tokens, start):
+        for width in (3, 2, 1):
+            value = " ".join(tokens[start:start + width])
+            if value in self._qualifier_states:
+                return self._qualifier_states[value]
+        # Preserve casing to distinguish e.g. "Houston IN" from "Houston in
+        # need of water". Lowercase event-state codes are handled above.
+        if start < len(tokens) and original_tokens[start] in _STATE_NAMES:
+            return original_tokens[start]
+        return None
 
     def match(self, text: str) -> tuple[list[str], str | None]:
         def expand(match):
-            return " " + re.sub(r"(?<=[a-z])(?=[A-Z])", " ", match[1]) + " "
-        tokens = re.findall(r"[a-z0-9']+", re.sub(r"#(\w+)", expand, text).lower())
+            words = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", match[1])
+            return " " + re.sub(r"(?<=[a-z])(?=[A-Z])", " ", words) + " "
+        original_tokens = re.findall(r"[a-zA-Z0-9']+", re.sub(r"#(\w+)", expand, text))
+        tokens = [token.lower() for token in original_tokens]
         found, counties = [], []
         i = 0
         while i < len(tokens):
-            for n in (4, 3, 2, 1):
+            for n in self._widths:
                 if i + n > len(tokens):
                     continue
                 key = " ".join(tokens[i:i + n])
@@ -101,8 +144,7 @@ class PlaceMatcher:
                 if before and (before[-1] in {"hurricane", "cyclone", "typhoon"}
                                or before == ["tropical", "storm"]):
                     continue
-                state = next((self._qualifier_states[value] for width in (3, 2, 1)
-                              if (value := " ".join(tokens[i + n:i + n + width])) in self._qualifier_states), None)
+                state = self._following_state(tokens, original_tokens, i + n)
                 if key == self._storm_name and state is None:
                     continue
                 if n == 1 and key in COMMON_WORD_PLACES:
@@ -110,11 +152,15 @@ class PlaceMatcher:
                         continue
                 index = self.index
                 if state is not None:
+                    if state not in self.states:
+                        i += n
+                        break
                     if state not in self._state_indexes:
-                        self._state_indexes[state] = self._gazetteer.place_index([state])
+                        self._state_indexes[state] = self._index([state])
                     index = self._state_indexes[state]
                     if key not in index:
-                        continue
+                        i += n
+                        break
                 display, fips = index[key]
                 if display not in found:
                     found.append(display)
