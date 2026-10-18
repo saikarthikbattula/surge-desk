@@ -451,6 +451,10 @@ def test_notebook_fast_review_budget_and_cached_only_loading():
                 assert scope["RUN_SPEED_PROBE"] is False and scope["bench_rows"] == []
                 assert len(scope["briefings"]) == 3
                 assert extraction.call_count == (0 if cached else 3)
+                assert len(scope["new_calls"]) == (0 if cached else 3)
+                assert {row["status"] for row in scope["quality_rows"]} == {
+                    "cache rechecked" if cached else "generated this run"}
+                assert sum(row["field_total"] for row in scope["quality_rows"]) == 15
 
 
 def test_cached_unsupported_need_is_rejected_without_model_calls():
@@ -503,3 +507,156 @@ def test_extract_real_granite_granite():
         print(f"Granite extract: {timing['seconds']:.3f} seconds")
     finally:
         llm.unload()
+
+
+def test_synthetic_extraction_examples_and_short_grounded_briefings():
+    # Invented reports only. Fake success checks plumbing, not Granite quality.
+    cases = [
+        ("Please send a ventilator to Pine Clinic.",
+         {"location": "Pine Clinic", "need": "Please send a ventilator"}),
+        ("We need blankets at Cedar Hall.",
+         {"location": "Cedar Hall", "need": "need blankets"}),
+        ("Donate to our storm relief fund.", {}),
+        ("Officials report 6 people died.", {"people_affected": "6 people died"}),
+        ("In 1900, 8,000 people died; this storm could be worse.", {}),
+        ("More updates soon.", {}),
+    ]
+    base_report = _fixture()[0][0]
+    incident = _last_snapshot(_fixture()[2])[0]
+    for source, expected in cases:
+        class LiteralFake:
+            def chat_json(self, system, user, schema, max_tokens):
+                assert user.split("Reports:\n", 1)[1].startswith("[1] " + source)
+                return {name: dict(value=quote, evidence=quote, confidence=1)
+                        for name, quote in expected.items()}, dict(seconds=0, attempts=1)
+
+            def chat_text(self, system, user, max_tokens):
+                assert "number of reports:" not in user
+                assert "explanation phrases:" not in user
+                assert "reason" not in system
+                assert "rank" not in user.lower()
+                for name in BRIEF_FIELDS:
+                    assert (name + ":" in user) == (name in expected)
+                name = next(iter(expected))
+                return f'Reports state: {expected[name]}. [{name}]', dict(seconds=0, attempts=1)
+
+        model = LiteralFake()
+        fields, _ = brief.extract_fields(model, [replace(base_report, text=source)])
+        assert {name: item["value"] for name, item in fields.items() if item["grounded"]} == expected
+        sentences, timing = brief.write_briefing(model, incident, fields)
+        if expected:
+            assert len(sentences) == 1 and sentences[0]["accepted"]
+        else:
+            assert sentences == [] and timing["attempts"] == 0
+
+
+def test_prompt_examples_cannot_supply_extraction_evidence():
+    class ContaminatedFake:
+        def chat_json(self, *args):
+            # Both quotes occur in instructions/examples, neither in Reports.
+            return {"need": dict(evidence="need blankets"),
+                    "location": dict(evidence="Pine Clinic")}, {}
+
+    fields, _ = brief.extract_fields(ContaminatedFake(), [replace(_fixture()[0][0], text="More updates soon.")])
+    assert fields == empty_fields()
+
+
+def test_chat_json_malformed_output_stops_after_two_attempts():
+    class MalformedModel:
+        def __init__(self):
+            self.calls = 0
+
+        def create_chat_completion(self, **kwargs):
+            assert set(kwargs) == {"messages", "max_tokens", "temperature"}
+            assert kwargs["max_tokens"] == config.EXTRACT_MAX_TOKENS
+            self.calls += 1
+            return {"choices": [{"message": {"content": "{broken"}}],
+                    "usage": {"prompt_tokens": 7, "completion_tokens": 3}}
+
+    model = llm.GraniteLLM.__new__(llm.GraniteLLM)
+    model.model, model.log_path = MalformedModel(), None
+    raw, timing = model.chat_json("system", "report", brief.EXTRACTION_SCHEMA, config.EXTRACT_MAX_TOKENS)
+    assert raw is None and not timing["ok"]
+    assert timing["attempts"] == model.model.calls == 2
+    assert timing["prompt_tokens"] == 14 and timing["completion_tokens"] == 6
+
+
+def test_adapter_error_logs_do_not_echo_backend_text():
+    class FailingModel:
+        def create_chat_completion(self, **kwargs):
+            raise ValueError("PRIVATE_SYNTHETIC_CONTACT should never reach a log")
+
+    model = llm.GraniteLLM.__new__(llm.GraniteLLM)
+    model.model = FailingModel()
+    with tempfile.TemporaryDirectory() as directory:
+        model.log_path = Path(directory) / "calls.jsonl"
+        model.chat_json("system", "report", brief.EXTRACTION_SCHEMA, config.EXTRACT_MAX_TOKENS)
+        model.chat_text("system", "report", config.BRIEF_MAX_TOKENS)
+        records = read_jsonl(model.log_path)
+        assert len(records) == 2
+        assert all(row["error"] == "ValueError" for row in records)
+        assert "PRIVATE_SYNTHETIC_CONTACT" not in model.log_path.read_text()
+
+
+def test_extra_hazard_urgency_vulnerability_and_need_claims_are_rejected():
+    fields = ground_fields({"location": dict(evidence="Pine Clinic"),
+                            "need": dict(evidence="Please send a ventilator")},
+                           ["Please send a ventilator to Pine Clinic."])
+    cases = [
+        ("Pine Clinic has a fire.", ["location"], "unsupported hazard claim 'fire'"),
+        ("Pine Clinic is in immediate danger.", ["location"], "unsupported urgency claim 'immediate'"),
+        ("Pine Clinic has elderly patients.", ["location"], "unsupported vulnerability claim 'elderly'"),
+        ("Please send a ventilator and blankets.", ["need"], "unsupported need claim 'blankets'"),
+    ]
+    for sentence, tags, reason in cases:
+        assert check_sentence(sentence, tags, fields, ["urgent requests for help"], set()) == (False, reason)
+    assert check_sentence("Reports state: Please send a ventilator.", ["need"], fields, [], set()) == (True, None)
+    fields = empty_fields()
+    assert not check_sentence("Ranked high because of classifier confidence and fire.",
+                              ["reason"], fields, ["classifier confidence"], set())[0]
+
+
+def test_direct_briefing_skips_no_grounded_fields():
+    class NoText:
+        def chat_text(self, *args):
+            raise AssertionError("Empty fields must not call the model")
+
+    sentences, timing = brief.write_briefing(NoText(), _last_snapshot(_fixture()[2])[0], empty_fields())
+    assert sentences == [] and timing["seconds"] == timing["attempts"] == 0
+
+
+def test_pipeline_cache_rejects_foreign_or_missing_representatives():
+    reports, _, incidents, _, _ = _fixture()
+    incident = _last_snapshot(incidents)[0]
+    foreign = next(report.report_id for report in reports if report.report_id not in incident.report_ids)
+    for representative in [foreign, "missing-report"]:
+        fake = FakeLLM()
+        old = Briefing(incident_id=incident.incident_id, event=incident.event,
+                       snapshot_time=incident.snapshot_time, cache_key=brief.cache_key(incident, "fake"),
+                       rep_report_ids=[representative], fields=empty_fields(),
+                       sentences=[], briefing="Old template", used_fallback=True,
+                       model_file="fake", timing=zero_timing())
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            write_jsonl(destination / config.BRIEFINGS_FILE, [old])
+            result = brief.brief_incidents(incident.event, [incident], llm=fake,
+                                          src_dir=fixture_dir(), out_dir=destination)[0]
+            assert fake.json_calls == 1
+            assert result.rep_report_ids and set(result.rep_report_ids) <= set(incident.report_ids)
+
+
+def test_cache_recheck_retains_original_recorded_timings():
+    incident = _last_snapshot(_fixture()[2])[0]
+    timing = dict(extract_s=12.5, brief_s=3.25, prompt_tokens=123., completion_tokens=45.)
+    old = Briefing(incident_id=incident.incident_id, event=incident.event,
+                   snapshot_time=incident.snapshot_time, cache_key=brief.cache_key(incident, "fake"),
+                   rep_report_ids=incident.report_ids[:1], fields=empty_fields(), sentences=[],
+                   briefing="Old template", used_fallback=True, model_file="fake", timing=timing)
+    fake = FakeLLM()
+    with tempfile.TemporaryDirectory() as directory:
+        destination = Path(directory)
+        write_jsonl(destination / config.BRIEFINGS_FILE, [old])
+        result = brief.brief_incidents(incident.event, [incident], llm=fake,
+                                      src_dir=fixture_dir(), out_dir=destination)[0]
+        assert result.timing == timing
+        assert fake.json_calls == fake.text_calls == 0

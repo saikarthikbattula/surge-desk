@@ -135,14 +135,14 @@ class GraniteLLM:
                         raise ValueError("JSON response was not an object")
                     parsed = self._plain_json_fields(value, schema)
                 except (ValueError, TypeError) as exc:
-                    error = f"{type(exc).__name__}: {exc}"
+                    error = type(exc).__name__  # Backend exceptions may echo private prompt/output text.
                     continue
 
                 timing["ok"] = True
                 error = None
                 break
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            error = type(exc).__name__  # Backend exceptions may echo private prompt/output text.
         finally:
             timing["seconds"] = time.perf_counter() - start
             self._record("json", timing, error)
@@ -173,7 +173,7 @@ class GraniteLLM:
             if not timing["ok"]:
                 error = "Granite returned empty text"
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            error = type(exc).__name__  # Backend exceptions may echo private prompt/output text.
         finally:
             timing["seconds"] = time.perf_counter() - start
             self._record("text", timing, error)
