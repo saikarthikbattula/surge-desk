@@ -261,6 +261,13 @@ These limitations describe the current prototype. Measured values and reference-
 
 ## Team and roles
 
-Person 1: integration/UI/evaluation, infrastructure, and LinuxONE runner. Person 2: data and tagging. Person 3: Granite conversion and grounded briefings. Person 4: grouping/ranking and the pitch/story. The repository uses person/agent labels to document implementation ownership.
+**Six Eyes**
+
+| Member | Role | Implementation owner |
+| --- | --- | --- |
+| Karthik (Person 1) | Integration, UI, evaluation, infrastructure, and LinuxONE runner | Agent 4 |
+| Ishan (Person 2) | Data preparation, embedding, tagging, and location matching | Agent 1 |
+| Yuvan (Person 3) | Granite conversion, extraction, grounding, and briefings | Agent 3 |
+| Krish (Person 4) | Grouping, ranking, fairness, and project presentation | Agent 2 |
 
 Built during the IBM Datathon 2026.

@@ -2,7 +2,7 @@
 
 **IBM Datathon 2026 · Theme 1: Real-Time AI for Critical Decisions**
 
-**Team identity:** registered team name and member names have not been supplied; implementation roles are recorded below.
+**Team: Six Eyes** — Karthik, Ishan, Yuvan, and Krish.
 
 ## Problem, beneficiaries, and purpose
 
@@ -66,9 +66,9 @@ Further work should distinguish specific needs from offers/commentary, validate 
 
 | Human driver | Contribution | Coding-agent responsibility |
 |---|---|---|
-| Person 1 | Infrastructure, LinuxONE execution, integration review, UI, evaluation | Agent 4: integration/UI/evaluation/benchmark |
-| Person 2 | Data and MiniLM preparation, tagging/location review | Agent 1: data, embedding, tagging, geography |
-| Person 3 | Granite conversion and model-quality work | Agent 3: LLM adapter, extraction, grounding, briefings |
-| Person 4 | Grouping/ranking, story and presentation coordination | Agent 2: grouping, features, ranking, fairness, baselines |
+| Karthik (Person 1) | Infrastructure, LinuxONE execution, integration review, UI, evaluation | Agent 4: integration/UI/evaluation/benchmark |
+| Ishan (Person 2) | Data and MiniLM preparation, tagging/location review | Agent 1: data, embedding, tagging, geography |
+| Yuvan (Person 3) | Granite conversion and model-quality work | Agent 3: LLM adapter, extraction, grounding, briefings |
+| Krish (Person 4) | Grouping/ranking, story and presentation coordination | Agent 2: grouping, features, ranking, fairness, baselines |
 
 The team used coding agents for implementation and humans for coordination, review, and LinuxONE runs. See [README.md](../README.md) for fixture and real-data run instructions, artifact requirements, model checksum, and cache behavior. Only the verified evaluation and demonstrated workflow are claimed here; template outputs are not presented as successful model-written briefings.
