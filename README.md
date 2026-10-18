@@ -10,7 +10,7 @@ SurgeDesk turns a stream of disaster reports into a ranked list of incidents wit
 | --- | --- | --- |
 | Tag | Local MiniLM embeddings in PyTorch, a scikit-learn humanitarian category classifier, text place matching, and vulnerable-person terms | Agent 1 |
 | Group | Online similarity, place, and time grouping into incidents | Agent 2 |
-| Rank | XGBoost priority scores, native feature contributions, and an adjustable SVI weighting | Agent 2 |
+| Rank | XGBoost assistance-category model, explicit current-need priority bands, feature contributions, and SVI adjustment within bands | Agent 2 |
 | Brief | Locally converted IBM Granite extracts quoted fields and drafts sentences; grounding checks reject unsupported output and provide a template fallback | Agent 3 |
 | Review | Historical replay, evidence cards, fairness slider, and an append-only validated human decision log | Agent 4 |
 
@@ -22,7 +22,7 @@ The supplied Dockerfile extends IBM's s390x JupyterLab container. Person 3 uses 
 
 IBM's environment provides zDNN/NNPA libraries. Hardware capability and the presence of a library do not establish an accelerated execution path: use the environment report, Granite load logs, and `benchmark.py` outputs as evidence. Device comparisons are explicitly skipped unless Agent 1 supplies `embed.compare_devices`.
 
-**Current checkout:** All four agents' stage modules are integrated: Person 2's data/tagging, Person 4's grouping/ranking/fairness/baselines, Person 3's grounded briefings, and Person 1's integration/review/evaluation. The fixture integration and notebooks have been checked locally, including XGBoost training and scoring; real-event data and local model files must still be provided for the complete pipeline. Person 1 confirmed the earlier fixture integration on LinuxONE and must run the newly integrated ranking stage and the full model/data workflow there. Only Person 1 runs the pipeline on the VM.
+**Current checkout:** All four agents' stages are integrated. Person 1 has exercised the real data/model workflow on LinuxONE, including the fixed BE Granite model and guarded fallback briefings. The revised assistance ranking needs a new LinuxONE training/ranking/evaluation run before its quality or performance can be claimed. Only Person 1 runs code on the VM.
 
 ## Quick start
 
@@ -71,11 +71,29 @@ Set `SURGEDESK_EVENT`, `SURGEDESK_ROOT`, `SURGEDESK_GRANITE`, and `SURGEDESK_TOP
 
 ## Results and annotation
 
+### Assistance ranking revision
+
+Real events default to `assistance_v1`. The training/evaluation category proxy now includes `requests_or_urgent_needs` and `missing_or_found_people`; injury/death news alone is not positive. Three additional text-feature shares describe current-assistance/unresolved-danger cues, historical/speculative context, and casualty-only updates. These use only masked source text available at the snapshot, never gold labels or Granite. Current means at the report/replay time, not today. They are conservative heuristics, not verified current emergencies.
+
+XGBoost is trained only on non-demo events. Its probability orders incidents within an explicit priority policy: current-assistance cues from the configured incident time window occupy the upper score band, and other context occupies the lower band. Old requests cannot keep a continuously updated incident in the assistance band indefinitely. All incidents remain visible. The score is a **priority score, not a calibrated probability of urgency**. Fairness adjusts within these bands, so an SVI boost cannot promote a casualty-only update over current-need cues. Feature explanations include their values: a positive SHAP contribution for a zero category share does not establish that activity occurred.
+
+Existing fixture schemas and targets stay unchanged. `SURGEDESK_RANKING_OBJECTIVE=legacy` explicitly selects the old behavior for real events and requires a matching model; never mix objectives in one run. The shared contracts accept both complete schemas, and stale production rankings/models fail with a rebuild message. Before overwriting a legacy model, training preserves it in `models/legacy_ranker/`. Evaluation compares the same incidents and orderings against both category targets in `ranking_objective_comparison.csv`; `LegacySurgeDesk` also appears when the archived model is available. Its scores are recomputed on the current groups. Neither category target is independent dispatch-urgency ground truth. Compare methods within one target, not scores across changed targets.
+
+For an existing installation, first back up the event output directory and model files, then run:
+
+```bash
+python -m surgedesk.pipeline --stage ranker
+python -m surgedesk.pipeline --stage rank --force
+SURGEDESK_LABEL_SOURCE=ai SURGEDESK_GENERATE_EXTRACTIONS=0 python -m surgedesk.pipeline --stage eval
+```
+
+Embeddings, classifier weights, and tagging can be reused for this ranking-only revision. Inspect the new `incident_review.csv` before another Granite run. New top incidents may be unbriefed; this is distinct from failed extraction. `rank_model_scores.jsonl` keeps base-model, priority-policy, and available legacy-model scores. `ranking_provenance.json` records the objective and input/model signature so changed inputs cannot silently reuse ranked output.
+
 All pitch measurements must come from [`evaluate.py`](surgedesk/evaluate.py) or [`benchmark.py`](surgedesk/benchmark.py). See the generated [results](docs/RESULTS.md) and [report](docs/REPORT.md). Development results are labelled **Development run, NOT LinuxONE**; unavailable measurements remain unavailable. Do not replace these with estimated claims.
 
 After tagging, `make_label_sheet()` writes `data/labels/to_label.csv`; `make_purity_sheet()` writes `data/labels/purity_to_label.csv`. They preserve existing sheets unless explicitly forced. Humans save completed sheets as `hand_labels.csv` and `purity_labels.csv` in the same directory. Preserve `report_id` as plain text when exporting from a spreadsheet. Evaluation rejects scientific notation IDs, skips unfilled labels, and requests uncovered extraction predictions from Agent 3 when available.
 
-For a provisional AI reference review, put `ai_extraction_labels_DRAFT.csv` and `ai_purity_labels_DRAFT.csv` in `data/labels/` and run `SURGEDESK_LABEL_SOURCE=ai SURGEDESK_GENERATE_EXTRACTIONS=0 python -m surgedesk.pipeline --stage eval`. This evaluates stored predictions only and never starts Granite. Extraction stays unavailable until real predictions exist. Results and notebook 05 identify AI reference labels explicitly; they are not independent human ground truth. Grouping excludes uncertain, blank and unreviewed rows and reports included/excluded counts. Reviewed all-null AI extraction rows are retained as negative examples. Keep `label_provenance.json` with `summary.json` when sharing results. To return to human evaluation, omit `SURGEDESK_LABEL_SOURCE` (or set it to `human`) and provide the human-reviewed files. Leave extraction generation disabled until the Granite runtime crash has been resolved.
+For a provisional AI reference review, put `ai_extraction_labels_DRAFT.csv` and `ai_purity_labels_DRAFT.csv` in `data/labels/` and run `SURGEDESK_LABEL_SOURCE=ai SURGEDESK_GENERATE_EXTRACTIONS=0 python -m surgedesk.pipeline --stage eval`. This evaluates stored predictions only and never starts Granite. Extraction stays unavailable until real predictions exist. Results and notebook 05 identify AI reference labels explicitly; they are not independent human ground truth. Grouping excludes uncertain, blank and unreviewed rows and reports included/excluded counts. Reviewed all-null AI extraction rows are retained as negative examples. Keep `label_provenance.json` with `summary.json` when sharing results. To return to human evaluation, omit `SURGEDESK_LABEL_SOURCE` (or set it to `human`) and provide the human-reviewed files. Keep generation disabled for read-only evaluation; a deliberate extraction batch is a separate operation.
 
 Ranking metrics average eligible snapshots; urgency is a proxy. Time to surface is measured from first report to first top-k appearance; never-surfaced incidents remain censored. Reports, samples, evidence, and review notes displayed by Agent 4 pass through the shared privacy masker. Outputs and labels are ignored by Git.
 
@@ -110,6 +128,7 @@ The following list is reproduced from `PLAN.md` section 9. Its study size and ha
 
 **Models**
 - Classifier and ranker are trained on other disasters; performance shifts with disaster type and region.
+- Assistance text cues can miss slang, negation, time context, and indirect needs. The explicit priority policy and changed category target require independent operational review; proxy-metric gains do not establish better dispatch decisions.
 - Grouping thresholds were tuned by spot check, not a labeled benchmark; wrong merges and splits happen.
 - Granite 2B is small; it misses fields and misreads slang. Its confidence values are self-reported, not calibrated.
 - Grounding proves a claim traces to a report, not that the report is true. Misinformation passes through.

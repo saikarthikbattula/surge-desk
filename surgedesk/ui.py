@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config, fileio
-from .contracts import Briefing, Decision, FEATURE_PLAIN, Incident, Report, Tagged
+from .contracts import Briefing, Decision, FEATURE_PLAIN, Incident, Report, Tagged, feature_reason
 from .pipeline import StageUnavailable, pick_snapshot, require_module
 from .textutil import mask_privacy, to_iso
 
@@ -35,6 +35,8 @@ def load_demo(event: str = config.DEMO_EVENT, stub: bool = False,
               src_dir: Path | None = None) -> DemoData:
     d = _source(event, stub, src_dir)
     incidents = fileio.read_jsonl(d / config.INCIDENTS_FILE, Incident)
+    if not stub and config.ranking_objective(event) == "assistance_v1":
+        require_module("rank", "demo").validate_ranked_outputs(event, incidents)
     reports = fileio.read_jsonl(d / config.REPORTS_FILE, Report)
     briefs = fileio.read_jsonl(d / config.BRIEFINGS_FILE, Briefing) if (d / config.BRIEFINGS_FILE).exists() else []
     incident_lookup = {(i.incident_id, i.snapshot_time): i for i in incidents}
@@ -80,11 +82,15 @@ def _card(incident, data, baseline, reports):
     parts = [f'<article class="incident-card" data-incident-id="{_h(i.incident_id)}">',
              f'<h3>#{i.rank_adj} {_h(i.place or "Unknown place")} <small>{movement}</small></h3>',
              f'<p>{_h(i.incident_id)} · County {_h(i.county_fips or "unknown")} · <b>{svi}</b></p>',
-             f'<p>Score {i.score:.4f} · Adjusted {i.score_adj:.4f} · '
+             f'<p>{"Priority score" if "share_current_assistance" in i.features else "Score"} {i.score:.4f} · Adjusted {i.score_adj:.4f} · '
              f'{int(i.features["n_reports"])} reports</p><h4>Why it ranks here</h4>']
     scale = max((abs(v) for _, v in i.shap_top), default=1) or 1
+    if "share_current_assistance" in i.features:
+        parts.append('<p>Assistance-priority policy; this score is not a calibrated probability. '
+                     'Text cues require coordinator review. Fairness adjusts within priority bands. '
+                     'Bars below explain the base model, not the priority-band rule.</p>')
     for key, contribution in i.shap_top:
-        parts.append(f'<div>{_h(FEATURE_PLAIN[key])}: {contribution:+.4f} '
+        parts.append(f'<div>{_h(feature_reason(key, i.features))}: {contribution:+.4f} '
                      f'<meter min="0" max="1" value="{abs(contribution) / scale}"></meter></div>')
     b = data.briefings.get((i.incident_id, i.snapshot_time))
     if b:
@@ -100,7 +106,7 @@ def _card(incident, data, baseline, reports):
         parts.extend(f'<p>{_h(s["text"])} — {_h(s["reject_reason"])}</p>' for s in rejected)
         parts.append('</details>')
     else:
-        parts.append(f'<p>Granite briefs only the top {config.TOP_N_BRIEF} at the demo snapshot</p>')
+        parts.append('<p>No stored briefing for this incident at this snapshot.</p>')
     parts.append(f'<details><summary>{len(i.report_ids)} member reports</summary>')
     for rid in i.report_ids:
         timestamp = reports[rid].timestamp if rid in reports else "timestamp unavailable"
@@ -227,7 +233,7 @@ def live_replay(event: str = config.DEMO_EVENT, speed: float = 5.0, duration_s: 
                                   f'running p95 {stats["p95_latency_s"] * 1000:.1f} ms')
                 body = []
                 for i in incidents[:max(0, top)]:
-                    reason = FEATURE_PLAIN[i.shap_top[0][0]] if i.shap_top else "No explanation available"
+                    reason = feature_reason(i.shap_top[0][0], i.features) if i.shap_top else "No explanation available"
                     body.append(f'<tr><td>{i.rank_adj}</td><td>{_h(i.place or "Unknown")}</td>'
                                 f'<td>{int(i.features["n_reports"])}</td><td>{i.score_adj:.4f}</td>'
                                 f'<td>{_h(reason)}</td></tr>')

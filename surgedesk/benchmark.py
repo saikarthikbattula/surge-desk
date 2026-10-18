@@ -183,7 +183,8 @@ def run_all(event=config.DEMO_EVENT) -> dict:
         print(f'WARNING: benchmark threads_setting={info["threads_setting"]}; expected 3. Use bash run_benchmark.sh.', flush=True)
     d = config.event_dir(event)
     results = {"measured_on": {k: info[k] for k in ("arch", "cores", "ram_gb", "nnpa_flag")},
-               "caption": measured_caption(info)}
+               "caption": measured_caption(info), "ranking_objective": config.ranking_objective(event),
+               "ranker_trained_at": fileio.read_json(config.RANKER_META_PATH).get("trained_at") if config.RANKER_META_PATH.exists() else None}
     try:
         for name, fn in (("stream", bench_stream), ("granite", bench_granite), ("embed", bench_embed_devices)):
             try:

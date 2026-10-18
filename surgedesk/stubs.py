@@ -25,6 +25,7 @@ from .contracts import (
     FEATURE_KEYS,
     SHARE_CATEGORIES,
     URGENT_LABELS,
+    LEGACY_URGENT_LABELS,
     VULN_TERMS,
     Briefing,
     Incident,
@@ -33,6 +34,7 @@ from .contracts import (
     empty_fields,
     is_actionable,
     zero_timing,
+    feature_reason,
 )
 from .textutil import dedupe_key, minutes_between, parse_iso, to_iso
 
@@ -112,11 +114,19 @@ def reference_features(
 
 
 def reference_urgent_proxy(reports: list[Report]) -> int | None:
-    """1 if any member's gold label is in URGENT_LABELS, 0 otherwise, None if no gold labels at all."""
+    """Category relevance only; fixture/legacy modes retain the original target."""
+    if not reports:
+        return None
+    labels = LEGACY_URGENT_LABELS if config.ranking_objective(reports[0].event) == "legacy" else URGENT_LABELS
+    return category_urgent_proxy(reports, labels)
+
+
+def category_urgent_proxy(reports: list[Report], labels: frozenset[str]) -> int | None:
+    """Shared explicit target calculation for honest side-by-side evaluation."""
     golds = [r.gold_label for r in reports]
     if all(g is None for g in golds):
         return None
-    return int(any(g in URGENT_LABELS for g in golds))
+    return int(any(g in labels for g in golds))
 
 
 def snapshot_times(start: datetime, end: datetime, every_min: int = config.SNAPSHOT_MIN) -> list[datetime]:
@@ -226,11 +236,20 @@ def template_briefing_text(incident: Incident, fields: dict) -> str:
     reason = "no explanation available"
     if incident.shap_top:
         reason = ", ".join(
-            f"{_plain(k)}" for k, v in incident.shap_top[:2] if v > 0
+            feature_reason(k, incident.features) for k, v in incident.shap_top[:2] if v > 0
         ) or reason
+    policy = ""
+    reason_intro = "Ranked high because of"
+    if "share_current_assistance" in incident.features:
+        need = fields["need"]["value"] or "unknown"
+        vuln = fields["vulnerable"]["value"] or "unknown"
+        policy = ("Priority policy: current-assistance cues; coordinator review required. "
+                  if incident.features["share_current_assistance"] > 0 else
+                  "Context tier: no current-assistance cue detected. ")
+        reason_intro = "Base model factors"
     return (
-        f"{int(n)} report{'s' if n != 1 else ''} near {where}. Need: {need}. "
-        f"Vulnerable people: {vuln}. Ranked high because of: {reason}."
+        f"{policy}{int(n)} report{'s' if n != 1 else ''} near {where}. Need: {need}. "
+        f"Vulnerable people: {vuln}. {reason_intro}: {reason}."
     )
 
 

@@ -298,6 +298,30 @@ def test_check_sentence_rules():
         True, None)
 
 
+def test_brief_prompt_omits_unknown_fields_and_checks_reason_values():
+    from surgedesk.contracts import feature_reason
+    incident = _last_snapshot(_fixture()[2])[0]
+    values = dict(incident.features)
+    values.update(share_current_assistance=1.0, share_historical_or_speculative=0.0, share_casualty_only=0.0)
+    values["share_rescue_volunteering_or_donation_effort"] = 0.0
+    incident = replace(incident, features=values, shap_top=[["share_rescue_volunteering_or_donation_effort", 1.0]])
+    fields = empty_fields()
+    fields["people_affected"] = dict(value="First Responder", evidence="First Responder", confidence=1.0, grounded=True)
+    class QuotesOnly:
+        def chat_text(self, system, user, max_tokens):
+            assert "people_affected: First Responder" in user
+            assert "hazard:" not in user and "location:" not in user and "need:" not in user
+            return "Reports state: First Responder. [people_affected]", dict(seconds=0, prompt_tokens=0, completion_tokens=0)
+    sentences, _ = brief.write_briefing(QuotesOnly(), incident, fields)
+    assert sentences[0]["accepted"]
+    reason = feature_reason("share_rescue_volunteering_or_donation_effort", values)
+    assert "0%" in reason
+    allowed = numbers_allowed(incident, fields)
+    assert check_sentence(f"Ranked high because of {reason}.", ["reason"], fields, [reason], allowed)[0]
+    assert not check_sentence(f"Ranked high because of {reason.replace('0%', '100%')}.",
+                              ["reason"], fields, [reason], allowed | {"100"})[0]
+
+
 def test_template_matches_stub():
     _, _, incidents, _, _ = _fixture()
     for incident in _last_snapshot(incidents):

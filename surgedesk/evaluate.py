@@ -6,14 +6,14 @@ import json
 import math
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from . import config, envcheck, fileio
-from .contracts import BRIEF_FIELDS, FEATURE_PLAIN, HAND_LABEL_COLUMNS, PURITY_COLUMNS, Briefing, Incident, Report, Tagged
+from .contracts import BRIEF_FIELDS, FEATURE_PLAIN, HAND_LABEL_COLUMNS, PURITY_COLUMNS, LEGACY_URGENT_LABELS, URGENT_LABELS, Briefing, Incident, Report, Tagged, feature_reason
 from .pipeline import StageUnavailable, pick_snapshot, require_module
 from .textutil import content_words, mask_privacy, parse_iso, to_iso
 
@@ -123,11 +123,12 @@ def _evaluation_inputs(d, label_mode=None):
         config.REPORTS_FILE, config.TAGGED_FILE, config.INCIDENTS_FILE,
         config.BRIEFINGS_FILE, "groups.jsonl", "group_stats.json", "classifier_eval.json",
         "extraction_preds.jsonl", "demo_snapshot.txt",
+        config.RANK_PROVENANCE_FILE, config.RANK_SCORES_FILE,
     )}
     paths.update({f"labels/{kind}": _label_path(kind, label_mode) for kind in ("extraction", "grouping")})
     paths["ranker_metadata"] = config.RANKER_META_PATH
     for name in ("evaluate.py", "grounding.py", "brief.py", "rank.py", "fairness.py",
-                 "baselines.py", "config.py", "textutil.py"):
+                 "baselines.py", "features.py", "group.py", "contracts.py", "stubs.py", "config.py", "textutil.py"):
         paths[f"code/{name}"] = config.PACKAGE_DIR / name
     result = {}
     for name, path in paths.items():
@@ -401,13 +402,16 @@ def eval_ranking(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
     if not reports_path.exists():
         return _save(d, "ranking_eval.json", _skipped("reports.jsonl not available yet (owner: Agent 1)"))
     incidents = fileio.read_jsonl(path, Incident)
-    texts = {r.report_id: mask_privacy(r.text) for r in fileio.read_jsonl(reports_path, Report)}
+    if config.ranking_objective(event) == "assistance_v1":
+        require_module("rank").validate_ranked_outputs(event, incidents)
+    reports = {r.report_id: r for r in fileio.read_jsonl(reports_path, Report)}
+    texts = {rid: mask_privacy(r.text) for rid, r in reports.items()}
     snapshots = sorted({i.snapshot_time for i in incidents})
     methods = {"SurgeDesk": lambda rows: baselines.order_surgedesk(
                    sorted(rows, key=lambda i: i.rank)),
                "FIFO": baselines.order_fifo, "Volume": baselines.order_volume,
                "Keyword": lambda rows: baselines.order_keyword(rows, texts)}
-    metric_rows, surface_rows, means, times = [], [], {}, {}
+    metric_rows, surface_rows, means, times, method_orders = [], [], {}, {}, {}
     for name, order in methods.items():
         orders = {}
         for snap in snapshots:
@@ -425,6 +429,7 @@ def eval_ranking(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
         means[name] = {key: float(np.mean([r[key] for r in selected])) if selected else None
                        for key in ("p_at_10", "r_at_10", "ndcg_at_10")}
         surface = time_to_surface(incidents, orders)
+        method_orders[name] = orders
         surface_rows.extend(dict(method=name, **r) for r in surface)
         observed = [r["minutes"] for r in surface if not r["censored"]]
         times[name] = {"median_min": float(np.median(observed)) if observed else None,
@@ -437,7 +442,48 @@ def eval_ranking(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
         ax.set_ylabel("Median minutes (surfaced incidents only)")
 
     _figure(d, "time_to_surface.png", "Time to first top-k appearance; censored rows excluded", draw)
-    return _save(d, "ranking_eval.json", {"ranking": means, "time_to_surface": times})
+    comparison = _ranking_target_comparison(d, incidents, reports, method_orders)
+    return _save(d, "ranking_eval.json", {"ranking": means, "time_to_surface": times,
+                 "objective": config.ranking_objective(event), "target_comparison": comparison,
+                 "target_note": "Category proxies; not independently labeled current dispatch urgency. " +
+                 ("Priority bands use text cues, not verified emergencies." if config.ranking_objective(event) == "assistance_v1"
+                  else "Legacy mode retains the original broad category target and model scoring.")})
+
+
+def _ranking_target_comparison(d, incidents, reports, orders):
+    """Evaluate the same stored orderings against both explicit category targets."""
+    from dataclasses import replace
+    from .stubs import category_urgent_proxy
+
+    orders = dict(orders)
+    score_path = d / config.RANK_SCORES_FILE
+    if score_path.exists():
+        previous = {(r["incident_id"], r["snapshot_time"]): r["legacy_model_score"]
+                    for r in fileio.read_jsonl(score_path) if r.get("legacy_model_score") is not None}
+        if incidents and all((i.incident_id, i.snapshot_time) in previous for i in incidents):
+            orders["LegacySurgeDesk"] = {
+                snap: [i.incident_id for i in sorted((i for i in incidents if i.snapshot_time == snap),
+                       key=lambda i: (-round(previous[i.incident_id, snap], 6), i.first_seen, i.incident_id))]
+                for snap in orders["SurgeDesk"]}
+    result = []
+    for target, labels in (("assistance_category_proxy", URGENT_LABELS), ("legacy_broad_proxy", LEGACY_URGENT_LABELS)):
+        relabeled = [replace(i, urgent_proxy=category_urgent_proxy([reports[rid] for rid in i.report_ids], labels))
+                     for i in incidents]
+        by_snap = {}
+        for incident in relabeled:
+            by_snap.setdefault(incident.snapshot_time, []).append(incident)
+        for name, snapshots in orders.items():
+            values = [ranking_metrics(by_snap[snap], ordering) for snap, ordering in snapshots.items()]
+            values = [v for v in values if v.get("status") != "skipped"]
+            surface = time_to_surface(relabeled, snapshots)
+            observed = [row["minutes"] for row in surface if not row["censored"]]
+            result.append(dict(target=target, method=name,
+                               **{key: float(np.mean([v[key] for v in values])) if values else None
+                                  for key in ("p_at_10", "r_at_10", "ndcg_at_10")},
+                               median_min=float(np.median(observed)) if observed else None,
+                               share_surfaced=len(observed) / len(surface) if surface else None))
+    pd.DataFrame(result).to_csv(d / "ranking_objective_comparison.csv", index=False)
+    return result
 
 
 def eval_fairness(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
@@ -497,7 +543,9 @@ def _write_incident_review(d, event, incidents, reports, tags, briefs):
     """
     columns = ["incident_id", "snapshot_time", "rank", "score", "place", "county_fips", "n_reports",
                "ranking_reasons", "briefing_status", "grounded_fields", "briefing", "rejected_sentences",
-               "report_id", "timestamp", "representative", "pred_category", "pred_conf", "text"]
+               "report_id", "timestamp", "representative", "pred_category", "pred_conf", "text",
+               "priority_band", "model_score", "legacy_model_score", "current_assistance_evidence",
+               "assistance_cue_in_window", "historical_or_speculative", "casualty_only"]
     rows = []
     if not incidents or not reports:
         pd.DataFrame(columns=columns).to_csv(d / "incident_review.csv", index=False)
@@ -507,6 +555,13 @@ def _write_incident_review(d, event, incidents, reports, tags, briefs):
     by_report = {r.report_id: r for r in reports}
     by_tag = {t.report_id: t for t in tags or []}
     by_brief = {(b.incident_id, b.snapshot_time): b for b in briefs}
+    try:
+        assistance_signals = require_module("features", "incident review").assistance_signals
+    except StageUnavailable as exc:
+        pd.DataFrame(columns=columns).to_csv(d / "incident_review.csv", index=False)
+        return _save(d, "incident_review.json", _skipped(exc))
+    score_path = d / config.RANK_SCORES_FILE
+    model_scores = {(r["incident_id"], r["snapshot_time"]): r for r in fileio.read_jsonl(score_path)} if score_path.exists() else {}
     selected_briefs = []
     for incident in top:
         briefing = by_brief.get((incident.incident_id, snap))
@@ -519,17 +574,25 @@ def _write_incident_review(d, event, incidents, reports, tags, briefs):
             if rid not in by_report:
                 raise ValueError(f"Incident review: missing report {rid} referenced by {incident.incident_id} (owner: Agent 2)")
             report, tagged = by_report[rid], by_tag.get(rid)
+            score = model_scores.get((incident.incident_id, snap), {})
+            cues = assistance_signals(report)
             rows.append(dict(incident_id=incident.incident_id, snapshot_time=snap, rank=incident.rank,
                              score=incident.score, place=incident.place, county_fips=incident.county_fips,
                              n_reports=len(incident.report_ids),
-                             ranking_reasons="; ".join(FEATURE_PLAIN[k] for k, value in incident.shap_top if value > 0),
+                             ranking_reasons="; ".join(feature_reason(k, incident.features) for k, value in incident.shap_top if value > 0),
                              briefing_status=status, grounded_fields=mask_privacy(json.dumps(grounded)),
                              briefing=mask_privacy(briefing.briefing) if briefing else "",
                              rejected_sentences=mask_privacy(json.dumps(rejected)),
                              report_id=rid, timestamp=report.timestamp,
                              representative=rid in briefing.rep_report_ids if briefing else False,
                              pred_category=tagged.pred_category if tagged else None,
-                             pred_conf=tagged.pred_conf if tagged else None, text=mask_privacy(report.text)))
+                             pred_conf=tagged.pred_conf if tagged else None, text=mask_privacy(report.text),
+                             priority_band=("current_need_cues" if incident.features.get("share_current_assistance", 0) > 0 else "context") if "share_current_assistance" in incident.features else "legacy",
+                             model_score=score.get("model_score"), legacy_model_score=score.get("legacy_model_score"),
+                             current_assistance_evidence=json.dumps(cues["evidence"]),
+                             assistance_cue_in_window=cues["current_assistance"] and
+                             parse_iso(snap) - parse_iso(report.timestamp) <= timedelta(hours=config.WINDOW_HOURS),
+                             historical_or_speculative=cues["historical_or_speculative"], casualty_only=cues["casualty_only"]))
     pd.DataFrame(rows, columns=columns).to_csv(d / "incident_review.csv", index=False)
     return _save(d, "incident_review.json", {
         "event": event, "snapshot_time": snap, "n_exported_incidents": len(top), "n_exported_member_reports": len(rows),
@@ -566,6 +629,7 @@ def _results(summary, sections, info):
     if provenance["provisional"]:
         text += "\n**PROVISIONAL AI-BASED EVALUATION: extraction agreement and grouping purity use AI reference labels, not independent human ground truth. Human validation is pending.**\n\n"
     text += "Classifier metrics use the dataset's gold labels. Ranking/fairness metrics use urgent_proxy, not AI extraction labels or dispatch outcomes.\n\n"
+    text += "Ranking objective: " + sections["ranking"].get("objective", "unavailable") + ". Category agreement is not independently validated operational urgency. Assistance scores use explicit priority bands, not calibrated probabilities.\n\n"
     text += _markdown_table([dict(event=summary["event"], **summary["measured_on"])])
     for title, keys in (("Data and grouping", ["n_reports", "n_actionable", "n_incidents", "singleton_share", "purity"]),
                         ("Classifier and ranker", ["classifier_macro_f1", "ranker_dev_auc"])):
@@ -573,6 +637,8 @@ def _results(summary, sections, info):
     for title, key in (("Ranking (mean over eligible snapshots)", "ranking"), ("Time to surface", "time_to_surface")):
         text += f"\n## {title}\n\n" + _markdown_table([dict(method=m, **v) for m, v in summary[key].items()])
     text += "\nTime-to-surface medians include surfaced incidents only; share_surfaced includes censored incidents. Snapshots without any urgent proxy are excluded from ranking metrics.\n"
+    text += "\n## Both ranking targets on the same incidents\n\n" + _markdown_table(sections["ranking"].get("target_comparison", []))
+    text += "\nLegacySurgeDesk, when available, is the preserved previous model scored on the current groups. Targets differ; do not compare metrics across different targets as a quality improvement.\n"
     text += "\n## Fairness at demo snapshot\n\n" + _markdown_table(summary["fairness_demo_snapshot"])
     text += "\n## Fairness mean over snapshots\n\n" + _markdown_table(sections["fairness"].get("mean", []))
     text += "\n## Grouping details\n\n" + _markdown_table([sections["grouping"]])
@@ -591,6 +657,8 @@ def _results(summary, sections, info):
 
 def run_all(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
     d = _dir(event, src_dir)
+    if config.ranking_objective(event) == "assistance_v1" and (d / config.INCIDENTS_FILE).exists():
+        require_module("rank").validate_ranked_outputs(event, fileio.read_jsonl(d / config.INCIDENTS_FILE, Incident))
     # Samples are prepared before evaluation, but missing upstream files never block other metrics.
     for sample in (make_label_sheet, make_purity_sheet):
         try:

@@ -74,6 +74,48 @@ SNAPSHOT_MIN = 30           # snapshot every N minutes of event time
 LAMBDAS = [0.0, 0.25, 0.5, 1.0]
 HIGH_SVI = 0.75             # "high vulnerability" county threshold for fairness metrics
 TOP_K_EVAL = 10
+RANKING_OBJECTIVE = os.environ.get("SURGEDESK_RANKING_OBJECTIVE", "assistance_v1")
+if RANKING_OBJECTIVE not in {"assistance_v1", "legacy"}:
+    raise ValueError("SURGEDESK_RANKING_OBJECTIVE must be assistance_v1 or legacy")
+RANK_PROVENANCE_FILE = "ranking_provenance.json"
+RANK_SCORES_FILE = "rank_model_scores.jsonl"
+LEGACY_RANKER_DIR = MODELS / "legacy_ranker"
+# Explicit priority bands, not probabilities. Context remains below current
+# needs even after the dashboard's maximum configured fairness adjustment.
+ASSISTANCE_SCORE_MIN = 0.6
+CONTEXT_SCORE_MAX = 0.25
+CONTEXT_ADJUSTED_MAX = 0.5
+ASSISTANCE_CACHE_SIZE = 25000
+ASSISTANCE_PATTERNS = (
+    r"\b(?:sos|mayday)\b|^\s*#?help(?:\s+(?:now|please|us|me))?\s*$",
+    r"\bplease\s+(?:help|send|rescue|bring)\b",
+    r"\b(?:need|needs|needing|request|requesting|requests|asking for|looking for)\s+(?:\w+\s+){0,2}(?:help|assistance|aid|rescue|boat|boats|food|water|shelter|medicine|medication|oxygen|insulin|supplies|volunteers|evacuation|transport|ambulance)\b",
+    r"\bneeds?\s+to\s+be\s+(?:rescued|evacuated)\b|\b(?:awaiting|waiting for)\s+(?:help|rescue|evacuation)\b",
+    r"\b(?:help|rescue)\s+(?:me|us|my|our|people|residents|families|family)\b",
+    r"\b(?:can|could)\s+(?:anyone|someone|you)\s+(?:help|rescue|send|bring)\b",
+    r"\b(?:anyone|someone)\s+(?:have|got|with)\s+(?:\w+\s+){0,2}(?:boat|water|food|shelter|transport|medicine)\b",
+    r"\b(?:trapped|stranded|stuck)\b",
+    r"\b(?:not|never)\s+(?:yet\s+)?rescued(?:\s+yet)?\b",
+    r"\b(?:missing|searching for)\s+(?:\w+\s+){0,3}(?:person|people|child|children|man|woman|boy|girl|teen|neighbor|family|mother|father|son|daughter)\b",
+    r"\b(?:without|out of|running out of)\s+(?:drinking water|food|water|medicine|oxygen|insulin)\b",
+    r"\b(?:help|rescue|boat|boats|food|water|shelter|supplies|volunteers)\s+(?:is |are )?(?:needed|required|urgently needed)\b",
+)
+ASSISTANCE_NEGATION = (
+    r"\b(?:no longer|not|never|don't|doesn't|do not|does not|didn't|did not)\s+"
+    r"(?:(?:really|currently|still|actually|urgently)\s+){0,2}(?:need|needs|trapped|stranded|stuck|missing|require|help|rescue)\b|"
+    r"(?<!not )(?<!never )(?<!yet )(?<!n't )\b(?:was rescued|were rescued|is rescued|are rescued|been rescued|already rescued|"
+    r"rescued (?:and|after|from|by|today|safely)|safe now|already evacuated|"
+    r"no (?:help|rescue|supplies) needed|found (?:alive|safe|unharmed))\b|"
+    r"\bmissing (?:child|person|man|woman|teen|girl|boy)\s+(?:was |is |has been )?found\b"
+)
+ASSISTANCE_SPECULATION = r"\b(?:might|would|forecast\w*|predict\w*|expected|projected)\b|\b(?:could|may)\s+(?:be|cause|affect|displace|kill|injure|reach|rise|approach)\b"
+ASSISTANCE_HISTORY = r"\b(?:historical|historically|last year|years? ago|previous (?:storm|hurricane|flood)|back in)\b"
+CASUALTY_PATTERN = r"\b(?:dead|death|deaths|died|killed|casualties|death toll)\b"
+
+
+def ranking_objective(event: str) -> str:
+    """Frozen fixtures keep their original schema and broad relevance target."""
+    return "legacy" if event.startswith("fixture") else RANKING_OBJECTIVE
 
 # --------------------------------------------------------------------------- stage 4: brief
 TOP_N_BRIEF = int(os.environ.get("SURGEDESK_TOP_N", "10"))

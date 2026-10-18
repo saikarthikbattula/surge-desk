@@ -5,7 +5,7 @@ import math
 import re
 
 from . import config
-from .contracts import BRIEF_FIELDS, SENTENCE_TAGS, Incident
+from .contracts import BRIEF_FIELDS, SENTENCE_TAGS, Incident, feature_reason
 from .textutil import content_words, normalize_for_match
 
 
@@ -171,6 +171,10 @@ def numbers_allowed(incident: Incident, fields: dict) -> set[str]:
         field = fields.get(name, {})
         if field.get("grounded") and isinstance(field.get("value"), str):
             numbers.update(_numbers(field["value"]))
+    if "share_current_assistance" in incident.features:
+        for key, contribution in incident.shap_top:
+            if contribution > 0:
+                numbers.update(_numbers(feature_reason(key, incident.features)))
     return numbers
 
 
@@ -226,4 +230,11 @@ def check_sentence(sentence: str, tags: list[str], fields: dict, reasons: list[s
         } | numbers
         if {word for word in words if not word.isdigit()} - supported:
             return False, "reason not supported"
+        if any(": " in reason for reason in reasons):
+            remainder = re.sub(r"^ranked high because of\s*", "", sentence, flags=re.I).lower()
+            for reason in sorted(reasons, key=len, reverse=True):
+                remainder = remainder.replace(reason.lower(), "")
+            remainder = re.sub(r"\band\b|[\s,;.]+", "", remainder)
+            if remainder:
+                return False, "reason not supported"
     return True, None

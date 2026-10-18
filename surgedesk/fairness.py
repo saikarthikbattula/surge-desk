@@ -17,7 +17,13 @@ def apply(incidents: list[Incident], lam: float) -> list[Incident]:
     """Return independent adjusted records for one snapshot, ordered by rank_adj."""
     assert lam >= 0, "lambda must be nonnegative"
     assert len({(i.event, i.snapshot_time) for i in incidents}) <= 1, "Use one snapshot"
-    adjusted = [replace(i, score_adj=adjust(i.score, i.svi, lam), lam=lam) for i in incidents]
+    def adjusted_score(i):
+        value = adjust(i.score, i.svi, lam)
+        if "share_current_assistance" in i.features and i.features["share_current_assistance"] == 0:
+            value = min(value, config.CONTEXT_ADJUSTED_MAX)
+        return value
+
+    adjusted = [replace(i, score_adj=adjusted_score(i), lam=lam) for i in incidents]
     adjusted.sort(key=lambda i: (-i.score_adj, i.rank))
     return [replace(i, rank_adj=rank) for rank, i in enumerate(adjusted, 1)]
 

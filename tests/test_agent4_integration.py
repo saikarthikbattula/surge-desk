@@ -94,6 +94,36 @@ def test_time_to_surface_hand_example():
     assert result[1]["minutes"] is None and result[1]["censored"]
 
 
+def test_operational_ranking_compares_both_targets_and_preserved_model():
+    with tempfile.TemporaryDirectory() as root:
+        d = Path(root)
+        event = "operational_eval_2017"
+        reports = load_fixture(config.REPORTS_FILE, Report)[:2]
+        reports = [replace(reports[0], event=event, gold_label="requests_or_urgent_needs", text="Please send a boat."),
+                   replace(reports[1], event=event, gold_label="injured_or_dead_people", text="Officials report six deaths.")]
+        rows = []
+        for idx, report in enumerate(reports, 1):
+            item = _row(idx, 1 if idx == 1 else 0)
+            values = dict(item.features)
+            values.update(share_current_assistance=1.0 if idx == 1 else 0.0,
+                          share_historical_or_speculative=0.0, share_casualty_only=0.0 if idx == 1 else 1.0)
+            rows.append(replace(item, event=event, report_ids=[report.report_id], features=values))
+        fileio.write_jsonl(d / config.REPORTS_FILE, reports)
+        fileio.write_jsonl(d / config.INCIDENTS_FILE, rows)
+        fileio.write_jsonl(d / config.RANK_SCORES_FILE,
+                          [dict(incident_id=i.incident_id, snapshot_time=i.snapshot_time,
+                                legacy_model_score=0.1 if i.rank == 1 else 0.99) for i in rows])
+        with patch.object(config, "RANKING_OBJECTIVE", "assistance_v1"):
+            result = evaluate.eval_ranking(event, d)
+        comparisons = {(r["target"], r["method"]): r for r in result["target_comparison"]}
+        new = comparisons["assistance_category_proxy", "SurgeDesk"]
+        old = comparisons["assistance_category_proxy", "LegacySurgeDesk"]
+        assert new["ndcg_at_10"] == 1.0 and old["ndcg_at_10"] < new["ndcg_at_10"]
+        assert comparisons["legacy_broad_proxy", "SurgeDesk"]["p_at_10"] == 1.0
+        assert result["objective"] == "assistance_v1"
+        assert (d / "ranking_objective_comparison.csv").exists()
+
+
 def test_extraction_match_rule():
     assert evaluate.extraction_match("Meyerland Houston", "near Meyerland Houston")
     assert not evaluate.extraction_match("Meyerland Houston", "Rockport")

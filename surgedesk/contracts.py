@@ -41,10 +41,12 @@ NON_ACTIONABLE: frozenset[str] = frozenset(
     {"not_humanitarian", "sympathy_and_support", "dont_know_cant_judge"}
 )
 
-# Gold labels that make an incident snapshot urgent_proxy = 1 (evaluation/training target only).
-URGENT_LABELS: frozenset[str] = frozenset(
+# The original broad target remains available for comparison and old fixtures.
+LEGACY_URGENT_LABELS: frozenset[str] = frozenset(
     {"requests_or_urgent_needs", "injured_or_dead_people", "missing_or_found_people"}
 )
+# Approved operational revision: category proxy, not validated dispatch urgency.
+URGENT_LABELS: frozenset[str] = frozenset({"requests_or_urgent_needs", "missing_or_found_people"})
 
 # Predicted-category shares used as ranker features (order matters for FEATURE_KEYS).
 SHARE_CATEGORIES: list[str] = [
@@ -72,9 +74,14 @@ FEATURE_KEYS: list[str] = [
     "vuln_share",
     "mean_pred_conf",
 ] + [f"share_{c}" for c in SHARE_CATEGORIES]
+RANK_CONTEXT_KEYS = ["share_current_assistance", "share_historical_or_speculative", "share_casualty_only"]
+RANK_FEATURE_KEYS = FEATURE_KEYS + RANK_CONTEXT_KEYS
 
 # Plain-English names used in the UI and in Granite briefings.
 FEATURE_PLAIN: dict[str, str] = {
+    "share_current_assistance": "reports with current assistance or unresolved-danger cues",
+    "share_historical_or_speculative": "historical or speculative report context",
+    "share_casualty_only": "casualty updates without current assistance cues",
     "n_reports": "number of reports",
     "n_unique_texts": "number of distinct reports",
     "reports_last_60m": "reports in the last hour",
@@ -95,6 +102,21 @@ FEATURE_PLAIN: dict[str, str] = {
     "share_caution_and_advice": "warnings and advice",
     "share_other_relevant_information": "other relevant information",
 }
+
+
+def feature_reason(key: str, values: dict) -> str:
+    """A positive attribution is not evidence that the feature is present."""
+    label = FEATURE_PLAIN[key]
+    if "share_current_assistance" not in values:
+        return label  # Original fixture wording remains reproducible.
+    value = values[key]
+    if key in RANK_CONTEXT_KEYS:
+        return f"{label}: {value:.0%} of reports"
+    if key.startswith("share_"):
+        return f"{label}: {value:.0%} of reports classified in this category"
+    if key == "mean_pred_conf":
+        return f"{label}: {value:.0%}"
+    return f"{label}: {value:g}"
 
 # Vulnerable-person lexicon (case-insensitive, whole word or phrase).
 VULN_TERMS: list[str] = [
@@ -291,14 +313,15 @@ class Incident(_Record):
         _req(self.place is None or isinstance(self.place, str), "Incident.place must be str or null")
         _req(_is_fips(self.county_fips), "Incident.county_fips must be 5-digit str or null")
         _req(self.svi is None or _is_prob(self.svi), "Incident.svi must be in [0, 1] or null")
-        _req(isinstance(self.features, dict) and list(self.features) == FEATURE_KEYS, "Incident.features keys must equal FEATURE_KEYS in order")
+        _req(isinstance(self.features, dict) and list(self.features) in (FEATURE_KEYS, RANK_FEATURE_KEYS), "Incident.features keys must equal the legacy or assistance feature schema in order")
         _req(all(isinstance(v, (int, float)) and math.isfinite(v) for v in self.features.values()), "Incident.features values must be finite numbers")
+        _req(all(_is_prob(self.features[key]) for key in RANK_CONTEXT_KEYS if key in self.features), "Incident context shares must be in [0, 1]")
         _req(_is_prob(self.score) and _is_prob(self.score_adj), "Incident.score/score_adj must be in [0, 1]")
         _req(isinstance(self.lam, (int, float)) and self.lam >= 0, "Incident.lam must be >= 0")
         _req(isinstance(self.rank, int) and self.rank >= 1 and isinstance(self.rank_adj, int) and self.rank_adj >= 1, "Incident.rank/rank_adj must be ints >= 1")
         _req(isinstance(self.shap_top, list) and len(self.shap_top) <= 5, "Incident.shap_top must be a list of <= 5 pairs")
         for pair in self.shap_top:
-            _req(isinstance(pair, list) and len(pair) == 2 and pair[0] in FEATURE_KEYS and isinstance(pair[1], (int, float)), f"Incident.shap_top bad pair {pair!r}")
+            _req(isinstance(pair, list) and len(pair) == 2 and pair[0] in self.features and isinstance(pair[1], (int, float)), f"Incident.shap_top bad pair {pair!r}")
         _req(self.urgent_proxy in (None, 0, 1), "Incident.urgent_proxy must be 0, 1, or null")
 
 

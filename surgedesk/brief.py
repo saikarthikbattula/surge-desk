@@ -18,6 +18,7 @@ from .contracts import (
     Tagged,
     empty_fields,
     zero_timing,
+    feature_reason,
 )
 from .fileio import append_jsonl, load_embeddings, read_jsonl, write_jsonl
 from .grounding import _clean_sentence, check_sentence, ground_fields, numbers_allowed, split_tagged_sentences
@@ -58,9 +59,10 @@ BRIEF_SYSTEM = (
     "and tag it [reason]. Rescue/donation activity describes a ranking feature, not a request for aid."
 )
 BRIEF_USER = (
-    "Facts:\nhazard: {hazard}\nlocation: {location}\npeople_affected: {people_affected}\n"
-    "vulnerable: {vulnerable}\nneed: {need}\nnumber of reports: {n_reports}\n"
-    "reasons it ranked high: {reasons}\n\nWrite the briefing."
+    "Verified report quotes:\n{facts}\nnumber of reports: {n_reports}\n"
+    "base model explanation phrases: {reasons}\n\n"
+    "Write only about the supplied quotes. Use their field names as tags. "
+    "Do not fill in omitted fields. A ranking sentence is optional."
 )
 
 
@@ -97,18 +99,16 @@ def extract_fields(llm: GraniteLLM, reports: list[Report]) -> tuple[dict, dict]:
 
 
 def _positive_reasons(incident: Incident) -> list[str]:
-    return [FEATURE_PLAIN[key] for key, value in incident.shap_top if value > 0][:3]
+    return [feature_reason(key, incident.features) for key, value in incident.shap_top if value > 0][:3]
 
 
 def write_briefing(llm: GraniteLLM, incident: Incident, fields: dict) -> tuple[list[dict], dict]:
     """Generate and verify each tagged sentence before it can appear in a briefing."""
     reasons = _positive_reasons(incident)
-    field_values = {
-        name: mask_privacy(fields.get(name, {}).get("value") or "unknown")
-        for name in BRIEF_FIELDS
-    }
+    facts = "\n".join(f'{name}: {mask_privacy(fields[name]["value"])}'
+                      for name in BRIEF_FIELDS if fields.get(name, {}).get("grounded") and fields[name].get("value"))
     user = BRIEF_USER.format(
-        **field_values,
+        facts=facts or "No verified report quotes.",
         n_reports=int(incident.features["n_reports"]),
         reasons="; ".join(reasons),
     )
@@ -203,6 +203,9 @@ def brief_incidents(event: str, incidents: list[Incident], top_n: int = config.T
                     src_dir: Path | None = None, out_dir: Path | None = None) -> list[Briefing]:
     """Brief one fairness-adjusted snapshot, persisting each completed incident."""
     src_dir = Path(src_dir) if src_dir is not None else config.event_dir(event)
+    if config.ranking_objective(event) == "assistance_v1":
+        from .pipeline import require_module
+        require_module("rank", "brief").validate_ranked_outputs(event, incidents)
     out_dir = Path(out_dir) if out_dir is not None else config.event_dir(event)
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / config.BRIEFINGS_FILE
