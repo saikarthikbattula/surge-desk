@@ -13,7 +13,7 @@ import pandas as pd
 
 from . import config, fairness, fileio
 from .contracts import FEATURE_KEYS, RANK_FEATURE_KEYS, Incident
-from .features import _snapshot_row, build_snapshots, feature_keys, snapshot_columns
+from .features import _snapshot_row, build_snapshots, feature_definition, feature_keys, snapshot_columns
 from .group import GroupState, SVILookup, group_event, load_stage1
 from .textutil import parse_iso
 
@@ -40,6 +40,9 @@ def _check_model(model, event):
         raise ValueError("Ranker objective changed. Retrain with python -m surgedesk.pipeline --stage ranker before rank --force.")
     if not event.startswith("fixture") and any(e.startswith("fixture") for e in model.meta["train_events"]):
         raise ValueError("Fixture-trained ranker cannot score a real event; run stage ranker on non-demo real training events.")
+    expected = feature_definition(event)
+    if expected is not None and model.meta.get("feature_definition") != expected:
+        raise ValueError("Ranker assistance feature logic changed. Retrain stage ranker, then run stage rank --force.")
 
 
 def _priority_scores(rows, scores, objective):
@@ -150,6 +153,7 @@ def train_ranker(train_events: list[str], svi_lookup: SVILookup | None = None,
                 score_interpretation="Explicit assistance-priority bands with model probability ordering within bands" if objective == "assistance_v1" else "Legacy model score",
                 priority_bands={"current_min": config.ASSISTANCE_SCORE_MIN, "context_max": config.CONTEXT_SCORE_MAX,
                                 "context_fairness_cap": config.CONTEXT_ADJUSTED_MAX} if objective == "assistance_v1" else None,
+                feature_definition=feature_definition(train_events[0]),
                 train_events=list(train_events), n_rows=len(frame),
                 pos_rate=float(y.mean()), dev_auc=dev_auc, dev_ap=dev_ap, params=params,
                 trained_at=datetime.now(timezone.utc).isoformat())
@@ -167,6 +171,10 @@ class Ranker:
         self.keys = self.meta["feature_keys"]
         expected = RANK_FEATURE_KEYS if self.meta.get("objective", "legacy") == "assistance_v1" else FEATURE_KEYS
         assert self.keys == expected, "Ranker feature order differs; retrain stage ranker"
+        if self.meta.get("objective", "legacy") == "assistance_v1":
+            definition = feature_definition(self.meta["train_events"][0])
+            if definition is None or self.meta.get("feature_definition") != definition:
+                raise ValueError("Ranker assistance feature logic changed. Retrain stage ranker, then run stage rank --force.")
         self.booster = Booster(params={"nthread": config.N_THREADS})
         self.booster.load_model(path)
         self.booster.set_param({"nthread": config.N_THREADS})
@@ -242,6 +250,8 @@ def rank_event(event: str = config.DEMO_EVENT, force: bool = False, svi_lookup: 
         if config.ranking_objective(event) == "assistance_v1":
             manifest = out / config.RANK_PROVENANCE_FILE
             meta = model.meta if model else fileio.read_json(config.RANKER_META_PATH)
+            from types import SimpleNamespace
+            _check_model(model if model else SimpleNamespace(meta=meta), event)
             signature = _signature(event, src, meta, getattr(model, "path", config.RANKER_PATH))
             if not manifest.exists() or fileio.read_json(manifest).get("signature") != signature:
                 raise ValueError("Ranked outputs are stale after model/input changes; rerun stage rank --force.")
