@@ -56,6 +56,8 @@ Cached review, dashboard display, and evaluation apply the current evidence chec
 
 Evaluation also rechecks stored single-report extraction evidence against current source text, retaining the original generation timings. `evaluation_provenance.json` records content hashes of the evaluated inputs, labels, summary, and checking code; notebook 05 warns when saved results are stale or lack provenance. After new briefings or labels arrive, refresh with `SURGEDESK_LABEL_SOURCE=ai SURGEDESK_GENERATE_EXTRACTIONS=0 python -m surgedesk.pipeline --stage eval` for the provisional AI review. Do this after generation finishes. No Granite calls are needed. Formal Granite benchmark summaries identify the model file, thread/context/token settings, and uncached timing convention: completion tokens divided by total call time includes prompt processing, while model load is recorded separately. Cached notebook timings are not new benchmark measurements.
 
+The same evaluation run exports `incident_review.csv` and `incident_review.json` beside the summary. These diagnose the unchanged top ranking at the demo snapshot: masked member reports, classifier predictions, scores/reasons, checked briefing evidence, and rejection reasons. `representative` marks reports that the stored briefing used; `not_briefed` is distinct from a template fallback. The export does not rerank incidents, call Granite, or supply independent quality labels. Review these sources when broad casualty-news categories outrank concrete requests; proxy ranking scores alone do not establish current dispatch urgency.
+
 The CLI matches the existing runners:
 
 ```bash

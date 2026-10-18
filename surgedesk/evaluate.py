@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 import re
@@ -12,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from . import config, envcheck, fileio
-from .contracts import BRIEF_FIELDS, HAND_LABEL_COLUMNS, PURITY_COLUMNS, Briefing, Incident, Report, Tagged
+from .contracts import BRIEF_FIELDS, FEATURE_PLAIN, HAND_LABEL_COLUMNS, PURITY_COLUMNS, Briefing, Incident, Report, Tagged
 from .pipeline import StageUnavailable, pick_snapshot, require_module
 from .textutil import content_words, mask_privacy, parse_iso, to_iso
 
@@ -487,6 +488,58 @@ def briefing_metrics(briefs: list[Briefing]) -> dict:
             "fallback_share": sum(b.used_fallback for b in briefs) / len(briefs) if briefs else None}
 
 
+def _write_incident_review(d, event, incidents, reports, tags, briefs):
+    """Export the unchanged top ranking and masked sources for diagnosis.
+
+    Include every member, marking which reports Granite actually saw. An
+    unbriefed incident is distinct from a briefing whose checks failed.
+    This neither changes ranking nor supplies independent quality labels.
+    """
+    columns = ["incident_id", "snapshot_time", "rank", "score", "place", "county_fips", "n_reports",
+               "ranking_reasons", "briefing_status", "grounded_fields", "briefing", "rejected_sentences",
+               "report_id", "timestamp", "representative", "pred_category", "pred_conf", "text"]
+    rows = []
+    if not incidents or not reports:
+        pd.DataFrame(columns=columns).to_csv(d / "incident_review.csv", index=False)
+        return _save(d, "incident_review.json", _skipped("Incident review needs incidents.jsonl and reports.jsonl"))
+    snap = pick_snapshot(incidents, d, fixture=event.startswith("fixture"))
+    top = sorted((i for i in incidents if i.snapshot_time == snap), key=lambda i: i.rank)[:config.TOP_K_EVAL]
+    by_report = {r.report_id: r for r in reports}
+    by_tag = {t.report_id: t for t in tags or []}
+    by_brief = {(b.incident_id, b.snapshot_time): b for b in briefs}
+    selected_briefs = []
+    for incident in top:
+        briefing = by_brief.get((incident.incident_id, snap))
+        if briefing:
+            selected_briefs.append(briefing)
+        status = "not_briefed" if briefing is None else "template_fallback" if briefing.used_fallback else "generated_checked"
+        grounded = {name: value["evidence"] for name, value in briefing.fields.items() if value["grounded"]} if briefing else {}
+        rejected = [{"text": s["text"], "reason": s["reject_reason"]} for s in briefing.sentences if not s["accepted"]] if briefing else []
+        for rid in incident.report_ids:
+            if rid not in by_report:
+                raise ValueError(f"Incident review: missing report {rid} referenced by {incident.incident_id} (owner: Agent 2)")
+            report, tagged = by_report[rid], by_tag.get(rid)
+            rows.append(dict(incident_id=incident.incident_id, snapshot_time=snap, rank=incident.rank,
+                             score=incident.score, place=incident.place, county_fips=incident.county_fips,
+                             n_reports=len(incident.report_ids),
+                             ranking_reasons="; ".join(FEATURE_PLAIN[k] for k, value in incident.shap_top if value > 0),
+                             briefing_status=status, grounded_fields=mask_privacy(json.dumps(grounded)),
+                             briefing=mask_privacy(briefing.briefing) if briefing else "",
+                             rejected_sentences=mask_privacy(json.dumps(rejected)),
+                             report_id=rid, timestamp=report.timestamp,
+                             representative=rid in briefing.rep_report_ids if briefing else False,
+                             pred_category=tagged.pred_category if tagged else None,
+                             pred_conf=tagged.pred_conf if tagged else None, text=mask_privacy(report.text)))
+    pd.DataFrame(rows, columns=columns).to_csv(d / "incident_review.csv", index=False)
+    return _save(d, "incident_review.json", {
+        "event": event, "snapshot_time": snap, "n_exported_incidents": len(top), "n_exported_member_reports": len(rows),
+        "n_without_place": sum(not i.place for i in top), "n_with_briefings": len(selected_briefs),
+        "n_template_fallbacks": sum(b.used_fallback for b in selected_briefs),
+        "grounded_fields": {name: sum(b.fields[name]["grounded"] for b in selected_briefs) for name in BRIEF_FIELDS},
+        "note": "Diagnostic of unchanged top ranks; all member texts are masked. Not independent quality labels. not_briefed is not an extraction failure.",
+    })
+
+
 def _markdown_table(records):
     if not records:
         return "Not available yet.\n"
@@ -571,6 +624,7 @@ def run_all(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
     briefs = fileio.read_jsonl(d / config.BRIEFINGS_FILE, Briefing) if (d / config.BRIEFINGS_FILE).exists() else []
     if briefs:
         briefs = require_module("brief").review_cached_briefings(briefs, incidents or [], reports or [])
+    _write_incident_review(d, event, incidents, reports, tags, briefs)
     meta = fileio.read_json(config.RANKER_META_PATH) if config.RANKER_META_PATH.exists() else {}
     info = envcheck.collect()
     summary = {"event": event, "measured_on": {k: info[k] for k in ("arch", "cores", "ram_gb", "nnpa_flag")},

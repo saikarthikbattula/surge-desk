@@ -137,6 +137,36 @@ def test_summary_keys_on_fixture():
         assert "NaN" not in (d / config.SUMMARY_FILE).read_text()
 
 
+def test_incident_review_preserves_ranks_masks_sources_and_marks_unbriefed():
+    with tempfile.TemporaryDirectory() as root:
+        d = _copy(root)
+        reports = fileio.read_jsonl(d / config.REPORTS_FILE, Report)
+        reports = [replace(r, text=r.text + " Contact @private_reviewer https://private.example/path") for r in reports]
+        tags = fileio.read_jsonl(d / config.TAGGED_FILE, evaluate.Tagged)
+        incidents = fileio.read_jsonl(d / config.INCIDENTS_FILE, Incident)
+        briefs = fileio.read_jsonl(d / config.BRIEFINGS_FILE, Briefing)
+        before = [i.to_dict() for i in incidents]
+        with patch("surgedesk.brief.get_llm", side_effect=AssertionError("Review export must not load Granite")):
+            result = evaluate._write_incident_review(d, config.FIXTURE_EVENT, incidents, reports, tags, briefs)
+        frame = pd.read_csv(d / "incident_review.csv", dtype=str, keep_default_na=False)
+        assert len(frame) == result["n_exported_member_reports"]
+        assert frame.incident_id.nunique() == result["n_exported_incidents"]
+        assert set(frame.briefing_status) == {"generated_checked", "template_fallback", "not_briefed"}
+        assert not frame.loc[frame.briefing_status == "not_briefed", "representative"].eq("True").any()
+        assert "gold_label" not in frame
+        assert "@private_reviewer" not in (d / "incident_review.csv").read_text()
+        assert "https://private.example" not in (d / "incident_review.csv").read_text()
+        assert frame.text.str.contains("@user", regex=False).all()
+        assert [i.to_dict() for i in incidents] == before
+        expected = {(i.incident_id, rid) for i in incidents if i.snapshot_time == result["snapshot_time"]
+                    and i.rank <= config.TOP_K_EVAL for rid in i.report_ids}
+        assert set(zip(frame.incident_id, frame.report_id)) == expected
+        # Missing inputs replace old review rows with an empty, labeled export.
+        skipped = evaluate._write_incident_review(d, config.FIXTURE_EVENT, [], reports, tags, briefs)
+        assert skipped["status"] == "skipped"
+        assert pd.read_csv(d / "incident_review.csv").empty
+
+
 def test_label_sheet_sampling_and_scientific_ids():
     with tempfile.TemporaryDirectory() as root:
         root = Path(root)
