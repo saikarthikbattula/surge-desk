@@ -134,6 +134,7 @@ def bench_granite(event=config.DEMO_EVENT, n=10) -> pd.DataFrame:
             peak[0] = max(peak[0], process.memory_info().rss)
             rows.append({"incident_id": incident.incident_id, "extract_s": extract_s, "brief_s": brief_s,
                          "completion_tokens": tokens, "tokens_per_s": tokens / seconds if seconds > 0 else None})
+            print(f'Granite benchmark {len(rows)}/{len(at)}: {incident.incident_id} saved', flush=True)
     finally:
         done.set()
         watcher.join()
@@ -141,6 +142,10 @@ def bench_granite(event=config.DEMO_EVENT, n=10) -> pd.DataFrame:
     frame = pd.DataFrame(rows, columns=["incident_id", "extract_s", "brief_s", "completion_tokens", "tokens_per_s"])
     frame.to_csv(d / "benchmark_granite.csv", index=False)
     summary = {"load_s": load_s, "peak_rss_bytes": peak[0], "rss_sampling_interval_s": 0.05,
+               "model_file": getattr(llm, "model_file", config.GRANITE_PATH.name),
+               "configured_threads": config.N_THREADS, "configured_context_tokens": config.GRANITE_CTX,
+               "extract_max_tokens": config.EXTRACT_MAX_TOKENS, "brief_max_tokens": config.BRIEF_MAX_TOKENS,
+               "timing_note": "Uncached model calls; tokens_per_s is completion tokens divided by total call seconds, including prompt processing. Model load is recorded separately.",
                "nnpa_flag": info["nnpa_flag"], "zdnn_libs": info["zdnn_libs"], "n": len(frame),
                "mean_extract_s": float(frame.extract_s.mean()), "mean_brief_s": float(frame.brief_s.mean()),
                "tokens_per_s": float(frame.completion_tokens.sum() / (frame.extract_s.sum() + frame.brief_s.sum())) if (frame.extract_s.sum() + frame.brief_s.sum()) > 0 else None,

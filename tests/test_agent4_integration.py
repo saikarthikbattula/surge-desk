@@ -179,6 +179,70 @@ def test_extraction_metrics_with_labels():
         assert result["json_valid_rate"] == 1.0 and result["mean_seconds_per_report"] == 2.0
 
 
+def test_extraction_evaluation_rechecks_saved_grounding_and_preserves_original_timing():
+    with tempfile.TemporaryDirectory() as root:
+        root = Path(root)
+        d = _copy(root)
+        reports = fileio.read_jsonl(d / config.REPORTS_FILE, Report)
+        rid = reports[0].report_id
+        reports[0] = replace(reports[0], text="Harbor City's 1900 Death toll reached 8,000 people.")
+        fileio.write_jsonl(d / config.REPORTS_FILE, reports)
+        fields = empty_fields()
+        fields["people_affected"] = dict(value="8,000 people", evidence="8,000 people", confidence=1, grounded=True)
+        predictions = d / "extraction_preds.jsonl"
+        fileio.write_jsonl(predictions, [dict(report_id=rid, fields=fields, timing=dict(ok=True, seconds=42.0))])
+        saved = predictions.read_bytes()
+        row = dict.fromkeys(evaluate.HAND_LABEL_COLUMNS, "")
+        row.update(report_id=rid, labeler="AI")
+        with patch.object(config, "LABELS_DIR", root / "labels"), \
+             patch.object(config, "DEMO_EVENT", "hurricane_harvey_2017"), \
+             patch.dict(os.environ, {"SURGEDESK_LABEL_SOURCE": "ai"}), \
+             patch("surgedesk.brief.get_llm", side_effect=AssertionError("No model calls in evaluation")):
+            config.LABELS_DIR.mkdir()
+            pd.DataFrame([row]).to_csv(config.LABELS_DIR / "ai_extraction_labels_DRAFT.csv", index=False)
+            result = evaluate.eval_extraction(config.FIXTURE_EVENT, d)
+        assert result["people_affected"]["match_rate"] == 1.0
+        assert result["people_affected"]["predicted_non_null_rate"] == 0.0
+        assert result["mean_seconds_per_report"] == 42.0
+        assert predictions.read_bytes() == saved
+
+
+def test_evaluation_freshness_detects_changed_labels_briefings_and_code():
+    with tempfile.TemporaryDirectory() as root:
+        root = Path(root)
+        d = _copy(root)
+        with patch.object(config, "LABELS_DIR", root / "labels"), patch.object(config, "DOCS", root / "docs"), \
+             patch.dict(os.environ, {"SURGEDESK_LABEL_SOURCE": "ai", "SURGEDESK_GENERATE_EXTRACTIONS": "0"}):
+            assert evaluate.evaluation_freshness(config.FIXTURE_EVENT, d)["status"] == "missing"
+            fileio.write_json(d / config.SUMMARY_FILE, {})
+            assert evaluate.evaluation_freshness(config.FIXTURE_EVENT, d)["status"] == "unverified"
+            config.LABELS_DIR.mkdir()
+            label = config.LABELS_DIR / "ai_extraction_labels_DRAFT.csv"
+            row = dict.fromkeys(evaluate.HAND_LABEL_COLUMNS, "")
+            row.update(report_id=load_fixture(config.REPORTS_FILE, Report)[0].report_id, labeler="AI")
+            pd.DataFrame([row]).to_csv(label, index=False)
+            original_labels = label.read_bytes()
+            evaluate.run_all(config.FIXTURE_EVENT, d)
+            # Notebook 05 uses the saved AI mode even in a new default-human kernel.
+            with patch.dict(os.environ, {"SURGEDESK_LABEL_SOURCE": "human"}):
+                assert evaluate.evaluation_freshness(config.FIXTURE_EVENT, d)["status"] == "current"
+            row["location"] = "Houston"
+            pd.DataFrame([row]).to_csv(label, index=False)
+            assert "labels/extraction" in evaluate.evaluation_freshness(config.FIXTURE_EVENT, d)["changed_inputs"]
+            label.write_bytes(original_labels)
+            briefs = fileio.read_jsonl(d / config.BRIEFINGS_FILE, Briefing)
+            original_briefs = (d / config.BRIEFINGS_FILE).read_bytes()
+            briefs[0] = replace(briefs[0], used_fallback=True)
+            fileio.write_jsonl(d / config.BRIEFINGS_FILE, briefs)
+            assert config.BRIEFINGS_FILE in evaluate.evaluation_freshness(config.FIXTURE_EVENT, d)["changed_inputs"]
+            (d / config.BRIEFINGS_FILE).write_bytes(original_briefs)
+            altered = root / "altered_package"
+            altered.mkdir()
+            # Simulate a later code update without touching the checkout.
+            with patch.object(config, "PACKAGE_DIR", altered):
+                assert "code/grounding.py" in evaluate.evaluation_freshness(config.FIXTURE_EVENT, d)["changed_inputs"]
+
+
 def test_ai_purity_excludes_uncertain_and_unreviewed_rows():
     with tempfile.TemporaryDirectory() as root:
         root = Path(root)
@@ -392,7 +456,7 @@ def test_granite_benchmark_bypasses_briefing_cache():
         vectors[:, 0] = 1.0
         fileio.save_embeddings(d / config.EMBEDDINGS_FILE, vectors)
         calls = []
-        fake_llm = types.SimpleNamespace(load_s=1.25)
+        fake_llm = types.SimpleNamespace(load_s=1.25, model_file="test-fixed.gguf")
 
         def representatives(incident, reports, tags, embeddings):
             assert embeddings.dtype == np.dtype(np.float32)
@@ -410,6 +474,9 @@ def test_granite_benchmark_bypasses_briefing_cache():
         assert list(frame.tokens_per_s) == [6.0, 6.0]
         saved = fileio.read_json(d / "benchmark_granite_summary.json")
         assert saved["load_s"] == 1.25 and saved["peak_rss_bytes"] > 0
+        assert saved["model_file"] == "test-fixed.gguf"
+        assert saved["configured_threads"] == config.N_THREADS
+        assert "including prompt processing" in saved["timing_note"]
 
 
 def test_pipeline_cli_owner_diagnosis():

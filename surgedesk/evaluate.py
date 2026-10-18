@@ -1,6 +1,7 @@
 """Reproducible evaluation. Pitch metrics are computed here, never in notebooks."""
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import re
@@ -83,10 +84,10 @@ def _label_mode():
     return mode
 
 
-def _label_path(kind):
+def _label_path(kind, mode=None):
     names = {"human": {"extraction": "hand_labels.csv", "grouping": "purity_labels.csv"},
              "ai": {"extraction": "ai_extraction_labels_DRAFT.csv", "grouping": "ai_purity_labels_DRAFT.csv"}}
-    return config.LABELS_DIR / names[_label_mode()][kind]
+    return config.LABELS_DIR / names[_label_mode() if mode is None else mode][kind]
 
 
 def _label_provenance():
@@ -113,6 +114,53 @@ def _generate_extractions():
     if value not in {"0", "1"}:
         raise ValueError("SURGEDESK_GENERATE_EXTRACTIONS must be 0 or 1")
     return value == "1"
+
+
+def _evaluation_inputs(d, label_mode=None):
+    """Content hashes only: no report text or labels in the provenance record."""
+    paths = {name: d / name for name in (
+        config.REPORTS_FILE, config.TAGGED_FILE, config.INCIDENTS_FILE,
+        config.BRIEFINGS_FILE, "groups.jsonl", "group_stats.json", "classifier_eval.json",
+        "extraction_preds.jsonl", "demo_snapshot.txt",
+    )}
+    paths.update({f"labels/{kind}": _label_path(kind, label_mode) for kind in ("extraction", "grouping")})
+    paths["ranker_metadata"] = config.RANKER_META_PATH
+    for name in ("evaluate.py", "grounding.py", "brief.py", "rank.py", "fairness.py",
+                 "baselines.py", "config.py", "textutil.py"):
+        paths[f"code/{name}"] = config.PACKAGE_DIR / name
+    result = {}
+    for name, path in paths.items():
+        if not path.is_file():
+            result[name] = None
+            continue
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        result[name] = digest.hexdigest()
+    return result
+
+
+def evaluation_freshness(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
+    """Read-only check of saved summary inputs, without inference or evaluation."""
+    d = Path(src_dir) if src_dir is not None else config.event_dir(event)
+    if not (d / config.SUMMARY_FILE).exists():
+        return {"status": "missing", "note": "No saved evaluation yet."}
+    path = d / "evaluation_provenance.json"
+    if not path.exists():
+        return {"status": "unverified", "note": "Saved evaluation has no input provenance; rerun evaluation."}
+    recorded = fileio.read_json(path)
+    # The saved label mode wins: opening notebook 05 must not silently switch
+    # an AI evaluation back to the terminal's default human-label selection.
+    current = _evaluation_inputs(d, recorded["label_mode"])
+    changed = sorted(name for name in set(current) | set(recorded["inputs"])
+                     if current.get(name) != recorded["inputs"].get(name))
+    if hashlib.sha256((d / config.SUMMARY_FILE).read_bytes()).hexdigest() != recorded["summary_sha256"]:
+        changed.append(config.SUMMARY_FILE)
+    return {"status": "stale" if changed else "current", "changed_inputs": changed,
+            "evaluated_at": recorded["evaluated_at"],
+            "note": ("Saved evaluation inputs or checking code changed; rerun evaluation before using these numbers."
+                     if changed else "Saved evaluation matches the recorded inputs and checking code.")}
 
 
 def _hand_labels():
@@ -225,15 +273,18 @@ def eval_extraction(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dic
     reports_path = d / config.REPORTS_FILE
     if not reports_path.exists():
         return _save(d, "extraction_metrics.json", _skipped("reports.jsonl not available yet (owner: Agent 1)"))
-    report_ids = {r.report_id for r in fileio.read_jsonl(reports_path, Report)}
-    labels = labels[labels.report_id.isin(report_ids)]
+    reports = {r.report_id: r for r in fileio.read_jsonl(reports_path, Report)}
+    labels = labels[labels.report_id.isin(reports)]
     if labels.empty:
         return _save(d, "extraction_metrics.json", _skipped("No labeled reports for this event"))
     predictions = {p["report_id"]: p for p in fileio.read_jsonl(path)}
     missing = set(labels.report_id) - set(predictions)
     if missing:
         return _save(d, "extraction_metrics.json", _skipped(f"Missing predictions for {len(missing)} labeled reports (owner: Agent 3)"))
-    matched = [(row, predictions[row.report_id]) for row in labels.itertuples(index=False)]
+    ground_fields = require_module("grounding").ground_fields
+    matched = [(row, {**predictions[row.report_id], "fields": ground_fields(
+        predictions[row.report_id]["fields"], [mask_privacy(reports[row.report_id].text)])})
+        for row in labels.itertuples(index=False)]
     result = {}
     for field in BRIEF_FIELDS:
         pairs = [(getattr(row, field).strip(), pred["fields"][field]) for row, pred in matched]
@@ -505,6 +556,7 @@ def run_all(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
                 require_module("brief").extract_for_eval(event, ids, src_dir=d, out_dir=d)
             except (StageUnavailable, FileNotFoundError) as exc:
                 extraction_error = _skipped(exc)
+    input_hashes = _evaluation_inputs(d)
     sections = {"classifier": eval_classifier(event, d), "extraction": eval_extraction(event, d),
                 "grouping": eval_grouping(event, d), "ranking": eval_ranking(event, d),
                 "fairness": eval_fairness(event, d)}
@@ -534,4 +586,7 @@ def run_all(event=config.DEMO_EVENT, src_dir: Path | None = None) -> dict:
                "purity": sections["grouping"].get("purity")}
     summary = _save(d, config.SUMMARY_FILE, summary)
     _results(summary, sections, info)
+    _save(d, "evaluation_provenance.json", {"evaluated_at": to_iso(datetime.now(timezone.utc)),
+                                           "label_mode": _label_mode(), "inputs": input_hashes,
+                                           "summary_sha256": hashlib.sha256((d / config.SUMMARY_FILE).read_bytes()).hexdigest()})
     return summary
