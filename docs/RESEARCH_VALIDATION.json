@@ -1,0 +1,66 @@
+{
+  "tests": {
+    "passed": 133,
+    "failed": 0,
+    "skipped": 0,
+    "foundation_errors": 0
+  },
+  "selftest_log_sha256": "f4bbb96a44871060bcc0f4529f2e3ef58ca8178ee8ef98c3ac00f50290b1541d",
+  "notebooks": {
+    "notebooks\\06_research_demo.ipynb": "5600d449718bd71324379843016023f2fa6c80524115740f301ea8265c70a7d8",
+    "notebooks\\07_research_results.ipynb": "ea5be5e968261410b89b4aaf24fc751da3c109e800a2dd735b5ec94fd8e1a664"
+  },
+  "notebook_status": "passed",
+  "smoke_status": "passed",
+  "smoke_comparison": {
+    "identical_predictions": true,
+    "identical_quality_metrics": true
+  },
+  "reconstructed_manifest_fingerprint": "738198752c3cba16e19e86537a067051ce9da539a3dce8a277366c338768625a",
+  "limitations": [
+    "Hosted CI has not run",
+    "Browser visual review is pending URL verification",
+    "Human usability sessions not conducted",
+    "LinuxONE validation not conducted for this branch"
+  ],
+  "checked_source_files": {
+    "__init__.py": "b57ff4d77dea7a00761b77e8ab4386dfae8b66131a9b95b551138742456bee9c",
+    "artifacts.py": "449d294049e95db060296d5b2f0991b400f9f3d9beca19d88f97363c479158df",
+    "baselines.py": "7d9764500aebe08f08cb43542019b41e05e62840547db88b74b6c903cd5ff7b7",
+    "benchmark.py": "47bf36437ba51377fef84912781684369206a91ccad1285fd083e0a838284733",
+    "brief.py": "e965ea3000a3ac6f20696ed4fc439447c251231a95799a59ec8f0f4cd4fd098b",
+    "config.py": "fab05a17dd41f70a9d3506c7315c05597d8584f3795994f1ae6c341af81a4c07",
+    "contracts.py": "9d95694057967c2da253413cc898430fc9666fd2c88e6236020710b54d004bf2",
+    "data_humaid.py": "78c97a5d8133cac3e633ea0e60935a5147e4ec719c7da4de1c612ce156913c2a",
+    "embed.py": "aeafd75d795fc4a166acee2a0371acc624143cb0ccbd03238d35045bbaff4fec",
+    "envcheck.py": "9f871f92c3de305ec49f53e147c141e54e0015c81d8b15403986cad89966ee18",
+    "evaluate.py": "8949364bef7edf1c8631975574768528b96202ad22b0c1ebebdf0b32e911c5e1",
+    "fairness.py": "cfb191d2ec40691bc440e224122ee86ee349260be9781d3270483b67c9c6f1a5",
+    "features.py": "94667231b7a1859d6d3dd23b7c4560f15b6aab2a8fb9f3ece6c0153b0df3c0e6",
+    "fileio.py": "a343bc7a836294e3c79fd2998014f645a2b06b664ad4b9a1fa03e51b627cf5a7",
+    "geo.py": "cc4d85f7d1a42989723d1e898ce28f195fa38fd40aa830cfaab3c79fc50ba7bd",
+    "grounding.py": "7679868ab931d9b8ddd170f85e59cea34dee8814192c8c71e440cd8c266135f4",
+    "group.py": "507b6f815e55db2120609cd8cefc09e982dfd72dc58621cc73480a0f8442cd50",
+    "llm.py": "439eb57d57203f1ce81649bceb569e39140d6abb32707b5744e085b46ed23104",
+    "pipeline.py": "6a7823fa7fb09b65f0f52fe1d760bbfd773c54f13fbae64c56a9fe699d83afdd",
+    "pipeline_state.py": "a198dad85676748545805bd864a110e641356fe01ab9b3e0b67dcec71f204788",
+    "provenance.py": "034fc4358347bb5ed1ecf19cf72057e98e0fe650b2cf6a8810f92d31d7e1261a",
+    "rank.py": "ed8db4b041066352b00b71e02b2b7b7180087d87a9b3d9ce52c6ec52f68a8163",
+    "replay.py": "ce8c11fbf1b8463440959661d18cbd9599c218255638ae9d162c5197462c1438",
+    "research.py": "8c4c7bcf66d6ea00382409d46e0ecf411a3e0de68c1829d2fe4f231e695ad08a",
+    "research_data.py": "703e4ecee4a1e05d534ddd85b698852d4434d18e8da29ec2ff18d897277a1e75",
+    "research_demo.py": "21993c8bf941f740cb53fbaf034d5a00e7153b58a9eac8863114865604f0f268",
+    "research_notebooks.py": "bd89b8a71c426a70b7a99be38908a3ccda80f9af6340121a6626712d72aff4a3",
+    "research_profile.py": "b8033999bb8f1b4daf65ebb42d83c908ad07519233a28537b4291d97abdc231a",
+    "research_report.py": "5cc900c22242c226223188cd69fc6cb17fcc72b139cfa8c4c8723b486c8792a7",
+    "research_review.py": "114caa39c874c8d00b5a9482b791c62c986689b13600bf7bebf8943011e9946b",
+    "research_sweep.py": "7e6a45b767e6e9fefe57380e5385675f2c88b6a1f821e72ac2c3a721c18c51d3",
+    "research_walkthrough.py": "d4f5ea867fbd44542123eeb6fd0202106b97d61952f35e307f90795631f077a2",
+    "selftest.py": "d848dc900e7549e4b2fd08757f412e7dc576987ba71b45daecc33fa7373e7715",
+    "stubs.py": "93d3f10ebab326be5142f9024750ebf5fe2760cc3d0b3cb7b0eb0d44d6e1882e",
+    "tag.py": "7a781c4341bbd00c511d793926e28f3060e817cf4c11074b8d29610a4f471ff1",
+    "testing.py": "c208b343e8c11b91014e9e1c90e55fe6effa08daf3072d2439639d4e11401de0",
+    "textutil.py": "62af5e711de037b25efdb478af746249952bbb0c7c8805d651c9424615cebe40",
+    "ui.py": "522e6590b5b9474cc3f35c5eee67f59a45623feb9008f20d96a17599bc41d3b2"
+  }
+}

@@ -54,6 +54,11 @@ def _events() -> list[str]:
 
 
 def run_stage(stage: str, event: str, force: bool = False):
+    from .pipeline_state import run
+    return run(stage, event, force, _execute_stage)
+
+
+def _execute_stage(stage: str, event: str, force: bool = False):
     if stage == "data":
         require_module("data_humaid", stage).build_reports(force=force)
         events = _events()

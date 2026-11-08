@@ -25,7 +25,7 @@ LABELS_DIR = DATA / "labels"                     # to_label.csv, hand_labels.csv
 
 MODELS = ROOT / "models"
 MINILM_DIR = MODELS / "minilm"                   # sentence-transformers/all-MiniLM-L6-v2 files
-CLASSIFIER_PATH = MODELS / "classifier.joblib"
+CLASSIFIER_PATH = Path(os.environ.get("SURGEDESK_CLASSIFIER", str(MODELS / "classifier.joblib")))
 RANKER_PATH = MODELS / "ranker.json"
 RANKER_META_PATH = MODELS / "ranker_meta.json"
 GRANITE_PATH = Path(
@@ -149,6 +149,92 @@ BENCH_SPEEDS = [1.0, 5.0, 20.0, "max"]
 LABEL_SAMPLE_N = 100
 LABEL_SAMPLE_ACTIONABLE = 60
 PURITY_SAMPLE_N = 20
+
+# Solo research runs are isolated from the original event outputs.
+RESEARCH_DIR = OUTPUTS / "research"
+RESEARCH_SCHEMA = 1
+RESEARCH_MANIFEST_FILE = "manifest.json"
+RESEARCH_RESULT_FILE = "results.json"
+RESEARCH_MODEL_FILE = "classifier.joblib"
+RESEARCH_PREDICTIONS_FILE = "predictions.jsonl"
+RESEARCH_REVIEW_FILE = "review.jsonl"
+RESEARCH_SUMMARY_FILE = "SUMMARY.md"
+RESEARCH_TRAINING_FILE = "training.json"
+RESEARCH_PROVENANCE_FILE = "provenance.json"
+RESEARCH_CLASS_TABLE_FILE = "per_class.csv"
+RESEARCH_CONFUSION_FILE = "confusion.png"
+RESEARCH_PROFILE_FILE = "profile.json"
+RESEARCH_PROFILE_STATS_FILE = "profile.txt"
+RESEARCH_SWEEP_FILE = "sweep.json"
+RESEARCH_SMOKE_FILE = "smoke.json"
+RESEARCH_EMBED_CACHE_NAME = "embedding_cache"
+RESEARCH_RESERVED_ACCESS_NAME = "reserved_access"
+RESEARCH_SOURCE_JSON_NAME = "_source_json"
+RESEARCH_CLASS_REVIEW_FILE = "classification_review.json"
+RESEARCH_LOCATION_REVIEW_FILE = "location_review.json"
+RESEARCH_DEMO_PROVENANCE_FILE = "demo_provenance.json"
+RESEARCH_DEMO_HTML_FILE = "demo.html"
+RESEARCH_WALKTHROUGH_CAST = "walkthrough.cast"
+RESEARCH_WALKTHROUGH_HTML = "walkthrough.html"
+RESEARCH_WALKTHROUGH_META = "walkthrough.json"
+RESEARCH_NOTEBOOK_CHECKS_FILE = "checks.json"
+RESEARCH_BASELINE_EMBED_FILE = "baseline_embed.py"
+PIPELINE_ARCHIVE_INDEX_FILE = "archive.json"
+RESEARCH_BASELINE_COMMIT = "6d20725"
+RESEARCH_PARTITIONS = ("train", "dev", "test", "historical")
+RESEARCH_NEAR_DUPLICATE = 0.85
+RESEARCH_REVIEW_LIMIT = 50
+RESEARCH_C_VALUES = (0.1, 1.0, 10.0)
+RESEARCH_CLASS_WEIGHTS = (None, "balanced")
+RESEARCH_MAX_ITER = 2000
+RESEARCH_TFIDF_MAX_FEATURES = 50000
+RESEARCH_TFIDF_NGRAM = (1, 2)
+RESEARCH_BATCHES = (16, 32, 64)
+RESEARCH_MEMORY_POLL_S = 0.02
+RESEARCH_REPEAT = 2
+RESEARCH_PROFILE_LIMIT = 512
+RESEARCH_BOOTSTRAP_REPEATS = 2000
+RESEARCH_PUBLIC_RESULTS = DOCS / "RESEARCH_RESULTS.md"
+RESEARCH_PUBLIC_MANIFEST = DOCS / "RESEARCH_SPLIT_MANIFEST.json"
+RESEARCH_PUBLIC_EVIDENCE = DOCS / "RESEARCH_EVIDENCE.json"
+RESEARCH_CASE_STUDY = DOCS / "RESEARCH_CASE_STUDY.md"
+RESEARCH_BACKLOG = DOCS / "RESEARCH_BACKLOG.md"
+RESEARCH_PUBLIC_FIGURES = DOCS / "research_figures"
+RESEARCH_BASELINE_CONFUSION = "baseline_confusion.png"
+RESEARCH_SELECTED_CONFUSION = "selected_confusion.png"
+RESEARCH_NOTEBOOK_DIR = OUTPUTS / "notebook_checks"
+RESEARCH_NOTEBOOKS = (ROOT / "notebooks" / "06_research_demo.ipynb", ROOT / "notebooks" / "07_research_results.ipynb")
+RESEARCH_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
+RESEARCH_MODEL_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+RESEARCH_DATASET_ID = "QCRI/HumAID-events"
+RESEARCH_DATASET_REVISION = "2e7ea23332006f075068b90d401b178d847b447a"
+RESEARCH_HUB_URL = "https://huggingface.co"
+RESEARCH_DOWNLOAD_TIMEOUT = 30
+RESEARCH_TSV_LINE_ENDING = "\r\n"
+RESEARCH_SOURCE_MANIFEST_FILE = "source_manifest.json"
+RESEARCH_MODEL_FILES = ("config.json", "tokenizer.json", "tokenizer_config.json", "vocab.txt",
+                        "special_tokens_map.json", "model.safetensors", "sentence_bert_config.json")
+RESEARCH_GAZETTEER_YEAR = 2023
+RESEARCH_CENSUS_URL = "https://www2.census.gov/geo/docs/maps-data/data/gazetteer"
+EMBED_MANIFEST_FILE = "embeddings_manifest.json"
+TAG_MANIFEST_FILE = "tagged_manifest.json"
+LOCATION_EVIDENCE_FILE = "location_evidence.jsonl"
+STAGE_MANIFEST_FILE = "stage_manifest.json"
+RESEARCH_ASSISTANCE_LABELS = ("requests_or_urgent_needs", "missing_or_found_people")
+LOCATION_POLICY = os.environ.get("SURGEDESK_LOCATION_POLICY", "legacy")
+LOCATION_AMBIGUOUS_WORDS = frozenset({"north", "south", "east", "west", "advance", "cash", "speed", "kelly"})
+LOCATION_GENERIC_CITY_ARTICLES = frozenset({"a", "an", "any", "another", "some"})
+if LOCATION_POLICY not in {"legacy", "conservative"}:
+    raise ValueError("SURGEDESK_LOCATION_POLICY must be legacy or conservative")
+DECISION_PROVENANCE_FILE = "decision_provenance.jsonl"
+PIPELINE_RECEIPTS = OUTPUTS / "_stage_receipts"
+PIPELINE_ARCHIVES = OUTPUTS / "_stage_archives"
+PIPELINE_STAGE_FILES = {
+    "data": (REPORTS_FILE,), "embed": (EMBEDDINGS_FILE, EMBED_MANIFEST_FILE),
+    "tag": (TAGGED_FILE, TAG_MANIFEST_FILE, LOCATION_EVIDENCE_FILE),
+    "rank": (INCIDENTS_FILE, SNAPSHOTS_FILE), "brief": (BRIEFINGS_FILE,),
+    "eval": (SUMMARY_FILE,), "benchmark": (),
+}
 
 # --------------------------------------------------------------------------- event -> US states
 # Matched by keyword inside the HumAID event folder name, so exact folder spelling doesn't matter.

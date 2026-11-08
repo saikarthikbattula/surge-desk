@@ -1,5 +1,17 @@
 # SurgeDesk
 
+The solo improvement work is on `surgedesk-month-improvements`. See the
+[30-day plan](MONTH_PLAN.md), [research runbook](docs/RESEARCH_RUNBOOK.md), and
+[implementation/evidence checklist](docs/MONTH_STATUS.md). Run
+`python -m surgedesk.research smoke --run-id fixture-check` for the isolated
+synthetic evaluation/demo workflow after installing the laptop fixture
+requirements. New runs never overwrite the historical results below.
+
+The new [held-out event comparison](docs/RESEARCH_RESULTS.md),
+[case study](docs/RESEARCH_CASE_STUDY.md), and
+[experiment backlog](docs/RESEARCH_BACKLOG.md) are generated from the research
+artifacts. The author-mirror benchmark is separate from the original Set 1 run.
+
 SurgeDesk is a research prototype that turns historical disaster reports into a ranked list of incidents for a coordinator to inspect. Local models tag reports, group related messages, and rank incidents. An experimental IBM Granite stage attempts evidence-based extraction and briefings, with explicitly labeled template fallbacks when generation or checks fail. A human accepts, overrides, or dismisses each recommendation; SurgeDesk never dispatches help.
 
 **IBM Datathon 2026 · Theme 1: Real-Time AI for Critical Decisions.**

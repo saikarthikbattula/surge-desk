@@ -1,0 +1,7 @@
+# Optional laptop local-model experiments; never install packages on LinuxONE.
+-r requirements-research.txt
+torch==2.11.0
+transformers==5.19.0
+tokenizers==0.23.3
+huggingface_hub==2.4.0
+safetensors==0.8.0

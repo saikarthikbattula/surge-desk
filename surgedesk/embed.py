@@ -10,6 +10,8 @@ from . import config
 from .contracts import ContractError, Report
 from .fileio import load_embeddings, read_jsonl, save_embeddings, write_json
 from .textutil import mask_privacy
+from . import artifacts
+from .provenance import file_hash, report_identity, tree_hash
 
 
 class Embedder:
@@ -20,6 +22,7 @@ class Embedder:
         from transformers import AutoModel, AutoTokenizer
 
         self.threads, self.device = threads, device
+        self.model_dir = Path(model_dir)
         self._torch = torch
         torch.set_num_threads(threads)
         self.tokenizer = AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True)
@@ -50,22 +53,36 @@ class Embedder:
         return result
 
 
+def embedding_identity(reports, embedder=None):
+    return {"reports": report_identity(reports), "model": tree_hash(getattr(embedder, "model_dir", config.MINILM_DIR)),
+                "encoder": type(embedder).__qualname__ if embedder is not None else "Embedder",
+                "configuration": [config.EMBED_DIM, config.EMBED_MAX_TOKENS, config.EMBED_BATCH,
+                                  getattr(embedder, "threads", config.N_THREADS), getattr(embedder, "device", "cpu")],
+                "implementation": [file_hash(Path(__file__)), file_hash(Path(__file__).with_name("textutil.py"))]}
+
+
 def embed_event(event: str, force: bool = False, embedder: Embedder | None = None) -> np.ndarray:
     reports = read_jsonl(config.event_file(event, config.REPORTS_FILE), Report)
     target = config.event_file(event, config.EMBEDDINGS_FILE)
-    if target.exists() and not force:
-        cached = load_embeddings(target)
-        if cached.shape == (len(reports), config.EMBED_DIM):
-            return cached
+    manifest = config.event_file(event, config.EMBED_MANIFEST_FILE)
+    identity = embedding_identity(reports, embedder)
+    if not force and artifacts.valid(manifest, identity, [target]):
+        try:
+            cached = load_embeddings(target)
+            if cached.shape == (len(reports), config.EMBED_DIM) and np.isfinite(cached).all():
+                return cached
+        except (OSError, ValueError, ContractError):
+            pass
     embedder = embedder if embedder is not None else Embedder()
     start = time.perf_counter()
     embeddings = embedder.encode([r.text for r in reports])
     seconds = time.perf_counter() - start
-    if embeddings.shape != (len(reports), config.EMBED_DIM):
+    if embeddings.shape != (len(reports), config.EMBED_DIM) or not np.isfinite(embeddings).all():
         raise ContractError(f"Embedding/report shape mismatch: {embeddings.shape}, {len(reports)} reports")
     save_embeddings(target, embeddings)
     metrics = dict(n=len(reports), seconds=seconds, per_sec=len(reports) / seconds if seconds else 0.0,
                    threads=getattr(embedder, "threads", config.N_THREADS), device=getattr(embedder, "device", "cpu"))
     write_json(config.event_file(event, "embed_timing.json"), metrics)
+    artifacts.complete(manifest, identity, [target])
     print(f"{event}: {metrics['per_sec']:.2f} reports/sec")
     return embeddings
