@@ -15,7 +15,7 @@ research outcomes have been achieved. Historical results remain in `RESULTS.md`.
 | Offline regression checks | Fixture workflow in `.github/workflows/offline.yml`; self-test and synthetic smoke command | Hosted CI run after publication; no remote CI result claimed locally |
 | Demo and read-only results | Scripted synthetic fixture cards, notebooks 06/07, and a recorded automated terminal/API walkthrough with validated decisions | Browser visual review and human usability sessions are not established by automation |
 | Final multi-event evaluation | Reserved runs completed under the frozen selection; per-event/category comparisons, regressions, and descriptive event-bootstrap interval generated in `RESEARCH_RESULTS.md` | This reserved benchmark is now inspected; do not call subsequent tuning untouched |
-| Release and resume evidence | Computed case study/resume suggestions, experiment history, public split specification, runbook, and backlog | Final acceptance, attributable commits/PRs, and release tag; no hosted PR is claimed |
+| Release and resume evidence | Computed case study/resume suggestions, experiment history, public split specification, runbook, backlog, and local implementation commit `ed6c48b` | Final acceptance and release tag; no hosted PR is claimed |
 
 ## Usability task sheet
 
