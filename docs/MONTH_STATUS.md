@@ -28,7 +28,11 @@ record consent privately. Give everyone these tasks in the same order:
 4. Accept, override, or dismiss a recommendation and inspect its logged record.
 5. Locate quoted evidence supporting a displayed statement.
 
-For each task record completion, elapsed seconds, errors, and feedback. Do not
+The user confirmed that no consenting testers are available for this release.
+No human usability sessions were conducted, and no participant results or
+adoption counts are claimed. The task sheet remains available for future use.
+
+For each future task record completion, elapsed seconds, errors, and feedback. Do not
 invent participant results. An author-only walkthrough is labeled as such;
 participants are not ongoing product users. Save private observations beneath
 the research outputs directory. Fix blockers supported by observed behavior.

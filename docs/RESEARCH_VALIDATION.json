@@ -5,7 +5,7 @@
     "skipped": 0,
     "foundation_errors": 0
   },
-  "selftest_log_sha256": "f4bbb96a44871060bcc0f4529f2e3ef58ca8178ee8ef98c3ac00f50290b1541d",
+  "selftest_log_sha256": "adc45747f8a9fce851f966a1015fbf90d1b19f37f15fa0227dcff42cfc8377f0",
   "notebooks": {
     "notebooks\\06_research_demo.ipynb": "5600d449718bd71324379843016023f2fa6c80524115740f301ea8265c70a7d8",
     "notebooks\\07_research_results.ipynb": "ea5be5e968261410b89b4aaf24fc751da3c109e800a2dd735b5ec94fd8e1a664"
@@ -19,8 +19,8 @@
   "reconstructed_manifest_fingerprint": "738198752c3cba16e19e86537a067051ce9da539a3dce8a277366c338768625a",
   "limitations": [
     "Hosted CI has not run",
-    "Browser visual review is pending URL verification",
-    "Human usability sessions not conducted",
+    "Browser visual review awaits manual handling of a profile-sync prompt",
+    "No consenting usability testers are available; no human sessions were conducted",
     "LinuxONE validation not conducted for this branch"
   ],
   "checked_source_files": {
@@ -62,5 +62,18 @@
     "testing.py": "c208b343e8c11b91014e9e1c90e55fe6effa08daf3072d2439639d4e11401de0",
     "textutil.py": "62af5e711de037b25efdb478af746249952bbb0c7c8805d651c9424615cebe40",
     "ui.py": "522e6590b5b9474cc3f35c5eee67f59a45623feb9008f20d96a17599bc41d3b2"
-  }
+  },
+  "usability": {
+    "status": "not_conducted",
+    "reason": "User confirmed no consenting testers are available",
+    "participant_measurements": null
+  },
+  "browser_review": {
+    "status": "awaiting_manual_prompt_dismissal",
+    "url_verified": true,
+    "page_accessibility_verified": true,
+    "visual_review_complete": false,
+    "blocker": "Unexpected browser profile-sync prompt; authentication/privacy prompts require human handling"
+  },
+  "checked_implementation_commit": "7a4fba521b390ecc67143482bc8f573fbd5445f7"
 }

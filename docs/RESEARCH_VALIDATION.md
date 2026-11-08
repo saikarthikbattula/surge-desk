@@ -8,4 +8,9 @@ Generated from local command outputs. This is not a hosted CI or LinuxONE result
 - Public split specification reconstructed the identical ordered workloads without exposing report text or review notes.
 - Candidate Git paths excluded data/, models/, and outputs/; aggregate public JSON contained no report-text, individual gold-label, or annotation fields.
 
-Browser visual review remains pending because computer-use could not verify the task window URL. Hosted CI, human usability, and LinuxONE validation are not claimed.
+Edge verified the task-specific local demo URL and rendered its cards, rankings,
+and evidence in the accessibility tree. Visual inspection is awaiting manual
+dismissal of an unexpected browser profile-sync prompt; the agent does not
+interact with authentication/privacy prompts. The user confirmed that no
+consenting usability testers are available. Hosted CI, human usability results,
+and LinuxONE validation are not claimed.
