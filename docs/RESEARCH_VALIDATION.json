@@ -19,7 +19,6 @@
   "reconstructed_manifest_fingerprint": "738198752c3cba16e19e86537a067051ce9da539a3dce8a277366c338768625a",
   "limitations": [
     "Hosted CI has not run",
-    "Browser visual review awaits manual handling of a profile-sync prompt",
     "No consenting usability testers are available; no human sessions were conducted",
     "LinuxONE validation not conducted for this branch"
   ],
@@ -69,11 +68,23 @@
     "participant_measurements": null
   },
   "browser_review": {
-    "status": "awaiting_manual_prompt_dismissal",
+    "status": "passed",
+    "browser": "Chrome Guest",
     "url_verified": true,
     "page_accessibility_verified": true,
-    "visual_review_complete": false,
-    "blocker": "Unexpected browser profile-sync prompt; authentication/privacy prompts require human handling"
+    "visual_review_complete": true,
+    "reviewer": "Codex automated visual inspection",
+    "human_usability_validation": false,
+    "checked_demo": "outputs/research/release-walkthrough-v2-demo/demo.html",
+    "checked_demo_sha256": "af2a04e8e8bf141c802cca56a37e38f5052598d9fba0c034e1fe676bccfaa806",
+    "observations": [
+      "Synthetic banner and notebook decision-logging instructions readable",
+      "Incident cards, ranking contributions and location-review warnings readable",
+      "Quoted evidence table readable",
+      "Houston member-report disclosure expanded; four source fixture reports visible"
+    ],
+    "prior_blocker_resolution": "Earlier Edge window was closed. A dedicated Chrome guest window opened without a profile-sync prompt. No sync/account settings were changed.",
+    "scope": "Static synthetic dashboard on the current Windows display; no human usability session, mobile-layout test, or UI screen recording is claimed."
   },
   "checked_implementation_commit": "7a4fba521b390ecc67143482bc8f573fbd5445f7",
   "clean_environment": {
@@ -187,5 +198,11 @@
       "notebooks\\06_research_demo.ipynb": "5600d449718bd71324379843016023f2fa6c80524115740f301ea8265c70a7d8",
       "notebooks\\07_research_results.ipynb": "ea5be5e968261410b89b4aaf24fc751da3c109e800a2dd735b5ec94fd8e1a664"
     }
+  },
+  "release": {
+    "tag": "surgedesk-month-v1",
+    "scope": "Local research release on surgedesk-month-improvements",
+    "published": false,
+    "merged": false
   }
 }

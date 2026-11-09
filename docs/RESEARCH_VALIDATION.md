@@ -8,12 +8,14 @@ Generated from local command outputs. This is not a hosted CI or LinuxONE result
 - Public split specification reconstructed the identical ordered workloads without exposing report text or review notes.
 - Candidate Git paths excluded data/, models/, and outputs/; aggregate public JSON contained no report-text, individual gold-label, or annotation fields.
 
-Edge verified the task-specific local demo URL and rendered its cards, rankings,
-and evidence in the accessibility tree. Visual inspection is awaiting manual
-dismissal of an unexpected browser profile-sync prompt; the agent does not
-interact with authentication/privacy prompts. The user confirmed that no
-consenting usability testers are available. Hosted CI, human usability results,
-and LinuxONE validation are not claimed.
+Chrome Guest opened the task-specific local demo without a profile-sync prompt.
+Automated visual inspection verified the synthetic banner, incident cards,
+ranking reasons, location warnings, evidence table, and an expanded disclosure
+showing four Houston fixture reports. This is a static desktop visual check,
+not human usability testing or a UI screen recording. No account or sync
+settings were changed. The user confirmed that no consenting testers are
+available. Hosted CI, human usability results, and LinuxONE validation are not
+claimed.
 
 ## Clean checkout verification
 

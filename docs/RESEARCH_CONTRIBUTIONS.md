@@ -25,3 +25,9 @@ Use the measured, qualified resume suggestions in `RESEARCH_CASE_STUDY.md`.
 Missing-person recall regressed despite the overall macro-F1 improvement and
 must not be omitted when discussing tradeoffs. No hosted PR, public release,
 human usability result, or new LinuxONE measurement is claimed by this record.
+
+Local closeout: `680d6fa` records standalone clean-checkout verification. The
+local research release is tagged `surgedesk-month-v1` on the improvement branch;
+inspect its full authored history with
+`git log --oneline 6d20725..surgedesk-month-v1`. The release includes automated
+desktop visual review, with human usability and LinuxONE limitations retained.
