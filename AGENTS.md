@@ -1,5 +1,21 @@
 # AGENTS.md: SurgeDesk
 
+## Solo improvement branch (current instructions)
+
+On `surgedesk-month-improvements`, follow `MONTH_PLAN.md`. The human has
+authorized solo ownership of all repository modules and shared configuration,
+superseding the historical four-agent file ownership and team-approval rules
+below. Preserve existing public stage signatures and record contracts. Keep
+local-only inference, the existing dependency allowance, privacy masking,
+demo-event training exclusion, and honest computed evidence. Do not run on the
+LinuxONE VM; an authorized human performs any VM validation. Laptop fixture
+checks are required; unavailable real-data/model/VM validation must be recorded
+as pending. Historical handoffs describe compatibility requirements and original
+authorship, not new ownership. Do not delegate to sub-agents unless the human
+explicitly requests it. Keep all month-long work on this branch.
+
+The remaining instructions describe the original hackathon workflow.
+
 You are one of four Codex agents building SurgeDesk for the IBM Datathon 2026 (deadline 9:00 AM CT Sun Oct 18; feature freeze 3:00 AM). **Your human tells you your agent number. Read this file, then your handoff file, top to bottom, before writing code.** `PLAN.md` has the big picture.
 
 | Agent | Role | Your handoff (the full spec) | Human driver |

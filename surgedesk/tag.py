@@ -13,6 +13,8 @@ from .embed import Embedder
 from .fileio import load_embeddings, read_jsonl, write_json, write_jsonl
 from .geo import PlaceMatcher
 from .textutil import to_iso
+from . import artifacts
+from .provenance import file_hash, report_identity, tree_hash
 
 
 def find_vuln_terms(text: str) -> list[str]:
@@ -76,6 +78,7 @@ class Tagger:
 
         artifact = joblib.load(classifier_path)
         self.model = artifact["model"]
+        self.vectorizer = artifact.get("vectorizer")
         self.classes = np.asarray(artifact["classes"])
         if not np.array_equal(self.classes, self.model.classes_):
             raise ContractError("Classifier metadata classes do not match model.classes_")
@@ -95,12 +98,19 @@ class Tagger:
         embeddings = _check_embeddings(reports, embeddings)
         if not reports:
             return [], embeddings
-        probabilities = self.model.predict_proba(embeddings)
+        if self.vectorizer is None:
+            probabilities = self.model.predict_proba(embeddings)
+        else:
+            from .textutil import mask_privacy
+            probabilities = self.model.predict_proba(self.vectorizer.transform([mask_privacy(r.text) for r in reports]))
         indices = probabilities.argmax(axis=1)
         tagged = []
         for i, report in enumerate(reports):
             category = str(self.classes[indices[i]])
             places, county = self.matcher.match(report.text)
+            if config.LOCATION_POLICY == "conservative" and hasattr(self.matcher, "match_with_evidence"):
+                evidence = self.matcher.match_with_evidence(report.text)
+                places, county = evidence["places"], evidence["county_fips"]
             row = Tagged(report.report_id, start_row + i, category, round(float(probabilities[i, indices[i]]), 6),
                          places, county, find_vuln_terms(report.text), is_actionable(category))
             row.validate()
@@ -110,17 +120,37 @@ class Tagger:
 
 def tag_event(event: str, force: bool = False) -> list[Tagged]:
     reports = read_jsonl(config.event_file(event, config.REPORTS_FILE), Report)
+    embedding_manifest = config.event_file(event, config.EMBED_MANIFEST_FILE)
+    if embedding_manifest.exists():
+        from .embed import embedding_identity
+        if not artifacts.valid(embedding_manifest, embedding_identity(reports),
+                               [config.event_file(event, config.EMBEDDINGS_FILE)]):
+            raise ContractError("Embeddings are stale/incompatible; rerun stage embed before tagging")
     embeddings = _check_embeddings(reports, load_embeddings(config.event_file(event, config.EMBEDDINGS_FILE)))
     target = config.event_file(event, config.TAGGED_FILE)
+    evidence_path = config.event_file(event, config.LOCATION_EVIDENCE_FILE)
+    manifest = config.event_file(event, config.TAG_MANIFEST_FILE)
+    identity = {"reports": report_identity(reports), "embeddings": file_hash(config.event_file(event, config.EMBEDDINGS_FILE)),
+                "classifier": file_hash(config.CLASSIFIER_PATH), "gazetteer": tree_hash(config.GAZETTEER_DIR),
+                "states": config.states_for_event(event), "location_policy": config.LOCATION_POLICY,
+                "code": [file_hash(Path(__file__)), file_hash(Path(__file__).with_name("geo.py"))]}
     tagged = None
-    if target.exists() and not force:
+    if not force and artifacts.valid(manifest, identity, [target, evidence_path]):
         cached = read_jsonl(target, Tagged)
         if len(cached) == len(reports) and all(t.report_id == r.report_id and t.emb_row == i
                                                for i, (r, t) in enumerate(zip(reports, cached))):
             tagged = cached
     if tagged is None:
-        tagged, _ = Tagger(event).tag_batch(reports, embeddings)
+        tagger = Tagger(event)
+        tagged, _ = tagger.tag_batch(reports, embeddings)
         write_jsonl(target, tagged)
+        if hasattr(tagger.matcher, "match_with_evidence"):
+            write_jsonl(evidence_path,
+                        [{"report_id": r.report_id, **tagger.matcher.match_with_evidence(r.text)} for r in reports])
+        else:
+            write_jsonl(evidence_path, [{"report_id": r.report_id, "uncertainty": "unavailable",
+                                        "reason": "Custom matcher provides no evidence API"} for r in reports])
+        artifacts.complete(manifest, identity, [target, evidence_path])
     n = len(tagged)
     actionable = [t for t in tagged if t.is_actionable]
     metrics = dict(n=n, actionable_share=len(actionable) / n if n else 0.0,

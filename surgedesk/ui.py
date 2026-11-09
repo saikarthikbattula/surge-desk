@@ -34,6 +34,12 @@ def _source(event, stub, src_dir):
 def load_demo(event: str = config.DEMO_EVENT, stub: bool = False,
               src_dir: Path | None = None) -> DemoData:
     d = _source(event, stub, src_dir)
+    from . import artifacts
+    if (d / config.STAGE_MANIFEST_FILE).exists():
+        artifacts.verify(d / config.STAGE_MANIFEST_FILE)
+    if not stub and d.resolve() == (config.OUTPUTS / event).resolve():
+        from .pipeline_state import validate
+        validate("rank", event)
     incidents = fileio.read_jsonl(d / config.INCIDENTS_FILE, Incident)
     if not stub and config.ranking_objective(event) == "assistance_v1":
         require_module("rank", "demo").validate_ranked_outputs(event, incidents)
@@ -82,6 +88,8 @@ def _card(incident, data, baseline, reports):
     parts = [f'<article class="incident-card" data-incident-id="{_h(i.incident_id)}">',
              f'<h3>#{i.rank_adj} {_h(i.place or "Unknown place")} <small>{movement}</small></h3>',
              f'<p>{_h(i.incident_id)} · County {_h(i.county_fips or "unknown")} · <b>{svi}</b></p>',
+             '<p class="location-uncertainty">Location requires review. Place-to-county assignments may be approximate; '
+             'a detected place does not establish a precise report location.</p>',
              f'<p>{"Priority score" if "share_current_assistance" in i.features else "Score"} {i.score:.4f} · Adjusted {i.score_adj:.4f} · '
              f'{int(i.features["n_reports"])} reports</p><h4>Why it ranks here</h4>']
     scale = max((abs(v) for _, v in i.shap_top), default=1) or 1
@@ -149,6 +157,16 @@ def _log_decision(src_dir: Path, incident: Incident, action: str, new_rank: int 
                         to_iso(datetime.now(timezone.utc)), lam)
     decision.validate()
     fileio.append_jsonl(Path(src_dir) / config.DECISIONS_FILE, decision)
+    from .provenance import file_hash
+    d = Path(src_dir)
+    fileio.append_jsonl(d / config.DECISION_PROVENANCE_FILE,
+                       {"decision": decision.to_dict(), "incident_report_ids": incident.report_ids,
+                        "incidents_sha256": file_hash(d / config.INCIDENTS_FILE) if (d / config.INCIDENTS_FILE).exists() else None,
+                        "run_manifest_sha256": file_hash(d / config.STAGE_MANIFEST_FILE) if (d / config.STAGE_MANIFEST_FILE).exists() else None,
+                        "current_classifier_sha256": file_hash(config.CLASSIFIER_PATH) if config.CLASSIFIER_PATH.exists() else None,
+                        "current_ranker_sha256": file_hash(config.RANKER_PATH) if config.RANKER_PATH.exists() else None,
+                        "source_ranking_provenance": fileio.read_json(d / config.RANK_PROVENANCE_FILE) if (d / config.RANK_PROVENANCE_FILE).exists() else None,
+                        "note": "Current model files may differ from source models; source provenance is authoritative when present"})
     return decision
 
 

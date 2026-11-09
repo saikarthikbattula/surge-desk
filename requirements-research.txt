@@ -1,0 +1,13 @@
+# Laptop/CI fixture workflow only. Record resolved versions in each run.
+# Runtime project imports stay within the existing dependency allowance.
+# IBM LinuxONE uses its preinstalled environment; do not install there.
+numpy==2.3.5
+pandas==2.3.3
+scikit-learn==1.9.1
+xgboost==3.4.1
+joblib==1.5.3
+matplotlib==3.10.7
+psutil==7.2.2
+ipywidgets==8.1.9
+nbconvert==7.17.2
+ipykernel==7.4.0

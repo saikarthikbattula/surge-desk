@@ -1,0 +1,945 @@
+{
+  "manifest": {
+    "schema": 1,
+    "synthetic": false,
+    "source_repository": "QCRI/HumAID-events",
+    "source_revision": "2e7ea23332006f075068b90d401b178d847b447a",
+    "scope": "Author event mirror; not asserted identical to historical Set 1",
+    "rationale": "New author-mirror benchmark, separate from historical Set 1. Train spans hurricanes, floods, earthquakes, and wildfire; development uses Florence and Maryland; reserve Irma, California wildfire, and Kaikoura earthquake to test disaster and regional transfer. Harvey was previously inspected and is historical only. Partition choices precede new model results.",
+    "partitions": {
+      "train": [
+        "canada_wildfires_2016",
+        "cyclone_idai_2019",
+        "ecuador_earthquake_2016",
+        "greece_wildfires_2018",
+        "hurricane_dorian_2019",
+        "hurricane_maria_2017",
+        "hurricane_matthew_2016",
+        "italy_earthquake_aug_2016",
+        "kerala_floods_2018",
+        "midwestern_us_floods_2019",
+        "pakistan_earthquake_2019",
+        "puebla_mexico_earthquake_2017",
+        "srilanka_floods_2017"
+      ],
+      "dev": [
+        "hurricane_florence_2018",
+        "maryland_floods_2018"
+      ],
+      "test": [
+        "hurricane_irma_2017",
+        "california_wildfires_2018",
+        "kaikoura_earthquake_2016"
+      ],
+      "historical": [
+        "hurricane_harvey_2017"
+      ]
+    },
+    "active_counts": {
+      "test": 18970,
+      "dev": 7006,
+      "historical": 9105,
+      "train": 41383
+    },
+    "tsv_checksums": {
+      "california_wildfires_2018/california_wildfires_2018_train.tsv": "d8c39b31cb4937d4fd91c8282a90979366def80da43fe63616b1fd143adcf2b6",
+      "california_wildfires_2018/california_wildfires_2018_dev.tsv": "2cc82ddc685da1fda12e3aea3090d9b2cb6a119e1c9e34fa66dc1c715c6c5d91",
+      "california_wildfires_2018/california_wildfires_2018_test.tsv": "d00b29094f22535f2308cca91c627acbfa616d740325663cbe02ae057920edf2",
+      "hurricane_irma_2017/hurricane_irma_2017_train.tsv": "86049e2b56db930eb773a935585897887f052d59a18e4ed2ed7d6793a5ea7a31",
+      "hurricane_irma_2017/hurricane_irma_2017_dev.tsv": "c66a928f30da6782cb94a4dce02aa0db8a82c5db8583dd5319aa0d7ee96815ba",
+      "hurricane_irma_2017/hurricane_irma_2017_test.tsv": "86f1ff86f57c4290fc98fad93657301fa09afaf2d172cea8c11767378f4e4710",
+      "kaikoura_earthquake_2016/kaikoura_earthquake_2016_train.tsv": "8fb574bed08dc3967e9431eb15aa6b2628d2c513deee0d12304d21282bae950c",
+      "kaikoura_earthquake_2016/kaikoura_earthquake_2016_dev.tsv": "4d4105a452797dfdccdf006f7df63e4e38b376f3c6854ea87df284cd0ac847ef",
+      "kaikoura_earthquake_2016/kaikoura_earthquake_2016_test.tsv": "29929f828c9844ec1261dd7dcbc796ed496425861da5b7ad7b93741d5a2e85b4",
+      "hurricane_florence_2018/hurricane_florence_2018_train.tsv": "627a3b2069b0d24db4406e5fa8f6705d92d3ee2b9c9bf3dec5800aea86b5bc5d",
+      "hurricane_florence_2018/hurricane_florence_2018_dev.tsv": "96f7321117ab1bfc7c4c8b87f80a1b5ae691a17fd391106bd21a6f64c3e9959e",
+      "hurricane_florence_2018/hurricane_florence_2018_test.tsv": "ce00496e188c319c2be24faff3218864d43672f569e4fba76ef9fd76624dd104",
+      "maryland_floods_2018/maryland_floods_2018_train.tsv": "42883d2d94ba5d4400343a5294bedfe6197ddb76b6fdb00505c95dc400d757e3",
+      "maryland_floods_2018/maryland_floods_2018_dev.tsv": "a47e8e591694d53ba0c50192fefcbf6c6282a68a25dea90c4f01b00510507088",
+      "maryland_floods_2018/maryland_floods_2018_test.tsv": "0133f269eeeb0c2d528e4b9abeb43b8d94c61fe27bd0cda99878013427c18f23",
+      "hurricane_harvey_2017/hurricane_harvey_2017_train.tsv": "bf8c15f6694f177c89d312382d8d9a6c9e4750afcacc4b193fe3e19dc9c8393e",
+      "hurricane_harvey_2017/hurricane_harvey_2017_dev.tsv": "8749c4dbac50aa969f74004b77fe0b2ac895d16e101962a678bdd923b25881a4",
+      "hurricane_harvey_2017/hurricane_harvey_2017_test.tsv": "ebd8440eb9829bff48a641eaaed77ddaa5e1e90b14dd53e2ab2116258c7f1318",
+      "canada_wildfires_2016/canada_wildfires_2016_train.tsv": "a0cfe71a9ca2e9eeeef1c95145673694dd2a033c3a355bb3443814b7041a0e98",
+      "canada_wildfires_2016/canada_wildfires_2016_dev.tsv": "8eec9f471499f9caa6e9f3ea05029de09937f6a97bf2497fc5a002c36ac1b001",
+      "canada_wildfires_2016/canada_wildfires_2016_test.tsv": "4b61401d8b0e4880e10a5a1cbe250563a163c2ac85a7be349b243423f850e2fd",
+      "cyclone_idai_2019/cyclone_idai_2019_train.tsv": "818e9e6c533aa595a7084a07235051c72119db981c5eba9042e77bee8011340d",
+      "cyclone_idai_2019/cyclone_idai_2019_dev.tsv": "dd1742ddea5cf5797554486f6c322c67b0488b69f3d0b1c5e355bff0051cabb7",
+      "cyclone_idai_2019/cyclone_idai_2019_test.tsv": "c827eb8734b8993a5edba87f2ef63f8ffdbeeb32ca7994018a9c2cfb9fea5eb0",
+      "ecuador_earthquake_2016/ecuador_earthquake_2016_train.tsv": "531240829ca6c288d160d237a348d22fc232abcfcc38f653cd61662f5ecd3759",
+      "ecuador_earthquake_2016/ecuador_earthquake_2016_dev.tsv": "5e637842d1530055be397e45e062221489c383b0254105b7ca41dca896dadb26",
+      "ecuador_earthquake_2016/ecuador_earthquake_2016_test.tsv": "a9e139c9401894f22d7a04b22b160563440e4c87df8c3033119914f8f83d0c4f",
+      "greece_wildfires_2018/greece_wildfires_2018_train.tsv": "15736ef664f3bf2dae9e5e9344a83590eae693fe0c102f5ca22bdfd4849dbc0d",
+      "greece_wildfires_2018/greece_wildfires_2018_dev.tsv": "b3d2d8197ea395033825c791f2a09c43d8af1574710a3aea40ad8aa73dc53a9e",
+      "greece_wildfires_2018/greece_wildfires_2018_test.tsv": "6bf4fde2cbff22205dcc6d2b4b060799c730bb1f7c10c1fc2f39fcc4a07f6102",
+      "hurricane_dorian_2019/hurricane_dorian_2019_train.tsv": "a72fa3e4676a2c7d2f77b8c1eda6328c2a9b242c89df05293c8e7c8b55148d6e",
+      "hurricane_dorian_2019/hurricane_dorian_2019_dev.tsv": "7ee3333baaceabe24bea3a57de9889203205cf39e52ce656c80227188b6cf40d",
+      "hurricane_dorian_2019/hurricane_dorian_2019_test.tsv": "bd486f23472bba52f5dcae5754ea340bf7c70a5fc076baeb45f968f891d99a2e",
+      "hurricane_maria_2017/hurricane_maria_2017_train.tsv": "c4afebce015ec2a73ec588c66cbd4213ed31c14442e9b54a5ea05aba194c341b",
+      "hurricane_maria_2017/hurricane_maria_2017_dev.tsv": "eddd0fee919df7a35a43345348a5cfedf563b031405baf2ae28de469550afb48",
+      "hurricane_maria_2017/hurricane_maria_2017_test.tsv": "e261761bed19314557a1d24e05a61642dbe8a3a348bd395c109878318404858b",
+      "hurricane_matthew_2016/hurricane_matthew_2016_train.tsv": "0db889dd9861d3951b0e902dc90fd3a95f72934f805f88fdec993b3d4895f9e7",
+      "hurricane_matthew_2016/hurricane_matthew_2016_dev.tsv": "82c73293984e227f1f67235e23138a6f2a9ccf7ed213666351d5349205ac29ae",
+      "hurricane_matthew_2016/hurricane_matthew_2016_test.tsv": "cc8e029f4ebe2010573a4253f2adb8dd6aa3d9f583d806cd011be789e9a1f8cc",
+      "italy_earthquake_aug_2016/italy_earthquake_aug_2016_train.tsv": "f35d09080aca7a5af9c33b8f46cafa768c2c761d940a030a95f22fb6685e6f03",
+      "italy_earthquake_aug_2016/italy_earthquake_aug_2016_dev.tsv": "111153c3a06d694a7a6e8012ff50c43d1a51a2406ca707cd5e74e4fc532056ac",
+      "italy_earthquake_aug_2016/italy_earthquake_aug_2016_test.tsv": "fe2305b3f29e2763e00cd17683e1304df87cb648c4443bd8c9746b5c85378b67",
+      "kerala_floods_2018/kerala_floods_2018_train.tsv": "b70b926f83460e998a556206fe647438c7d1c414056c01beef9b431926e6cb41",
+      "kerala_floods_2018/kerala_floods_2018_dev.tsv": "c70a21ffe0f4cb7c0ded7c636442eb4a3fc1f6b70fc5baca84160245ab6725eb",
+      "kerala_floods_2018/kerala_floods_2018_test.tsv": "fef8e151ca33c1938bf5c0c77a732afa0473773ea87bdcee4fc9b5a23853e9f3",
+      "midwestern_us_floods_2019/midwestern_us_floods_2019_train.tsv": "15955ef35c3ebb95698a6456a4f6de907c1601dd43a0d9e6e706a5f84d548052",
+      "midwestern_us_floods_2019/midwestern_us_floods_2019_dev.tsv": "2dc4ba54d11ac445d8672fa3eb75bb77e6dd3159b290906084bf931deff322b9",
+      "midwestern_us_floods_2019/midwestern_us_floods_2019_test.tsv": "d05d1ed4dfa878f50a9eea33bf02d6673f5a54e630aed1ddc7903adc55445e24",
+      "pakistan_earthquake_2019/pakistan_earthquake_2019_train.tsv": "5c87da93afff4a3d63dc33970ae3f4ae2dd9127e944be6c1bd8d7f37b607e18e",
+      "pakistan_earthquake_2019/pakistan_earthquake_2019_dev.tsv": "f9f0dfe04d863da285b61f59b3f563eb5b0f369ac1c89043359fed532da49637",
+      "pakistan_earthquake_2019/pakistan_earthquake_2019_test.tsv": "f95e94f7e3f409a3e4bdf1accc994684ede0d92cb80959a80c73864932125292",
+      "puebla_mexico_earthquake_2017/puebla_mexico_earthquake_2017_train.tsv": "b671cc790b589d45d79bce086d72383bcd4253dbb4c84f0716ac98beda5589bd",
+      "puebla_mexico_earthquake_2017/puebla_mexico_earthquake_2017_dev.tsv": "e5e37af36d852a913b8af0f1ddb472de249d9670f0efdceb7e05cd4737e0be8d",
+      "puebla_mexico_earthquake_2017/puebla_mexico_earthquake_2017_test.tsv": "434a4a750e9be028752b926697c36c92be71141a5b02e7bd1fc1cd155a766008",
+      "srilanka_floods_2017/srilanka_floods_2017_train.tsv": "7c74d741bf19d41691f6ccd1805f78166064d7e3a59877c2a0bebb64d0e5d967",
+      "srilanka_floods_2017/srilanka_floods_2017_dev.tsv": "3c9d77d3b0350284647f5dd5cf8ef358adb3519351d6edfa93707cbceac5ab1c",
+      "srilanka_floods_2017/srilanka_floods_2017_test.tsv": "430515d2989df879b3c43afea92bc0e904c89b384f5bacbc99df7b110a0626b2"
+    },
+    "excluded_keys": [
+      "01a24a339fbcc40c92746083a51d39098b48bf125610c81439c4895cac080ddb",
+      "06f3015233eef120719fbb7aa1d175e192ecefe62766d6e1e201689b2bc03b63",
+      "087a9aba094378c4da7dc4725ca3d324f833ccf16e63a6efb02b1d19978b2dbf",
+      "0d19e1501b34561416b1068ffb9bb41945a29c8a16469ae28468eba59e46b558",
+      "0dbae76b3b079d363a297750ec5c333634de0d0f2a6c60047fba87a495384301",
+      "164a164ee4c1f35ee327a5c8a148fce633288eec665a6e1bca11a71e9c19a6b4",
+      "18e02604ae548111937444089913f3f3e15b842ffc72dcabe92670c1062abe0e",
+      "3ce251a18b6c6a094099b80453c4463cec130708017c4ae4e647c9c21cb1de32",
+      "4e7b7acddba65f82a5c8bad2c03140306677c85bb905e146360a34787d69d012",
+      "542611a9f70979977c312ab9ffa9af5a430d3092afda83d5d82b1cea1d61588a",
+      "56819fa3aac646deb8ce202f98f15d1abbbb4838fd7e9ba848489a6758e1c0e7",
+      "56f7ded00d76fc2e92cfb9dc3a12facc306f8ac21e49dd33215e1beceb5024ea",
+      "62b2707f7dd8f61aada0b59b4a1fca744346da9c685d2da4e667290a7f04f643",
+      "824b968224e9f224e3f83fe4d653d916a8fbd6420e3e117a42af5fb84167c368",
+      "8768abbe86fb66c347b8940ebf97705a698835914e89b0b841ab9e46af681995",
+      "95ca849fcdfe4f76eacd68a90b05716480941488662528c10282a03f8b7d463f",
+      "ac404844fe37008b8467af83f97c354081063773105b22c3682349d98793c409",
+      "b6a51c86101e6fb65f919bcd09d54ee57380cca8d72c7a2432963b8777c2d0f7",
+      "c639817c5587f50845e91d33b5cfda5fa44a9f0194d71473dd238b812ae9baec",
+      "cd3514f6dbda4ea1a05994fd14b1dbefa2732391077a3b8c8c23313f3292317a"
+    ],
+    "private_manifest_fingerprint": "a5a6d7c670f5da6f8c42fb5e3d0c930bc37613becdca4e538413f7594095a1c6",
+    "workload_fingerprints": {
+      "train": "77cd23011fdbeb5f412b4dea202e81fa1a948ce249e81f8cb0578291f22d6f13",
+      "dev": "bec523fc4a2839416a503a032f75c23bdeb1733cd8bea856641c49017791fc38",
+      "test": "c3abce6d5f729945741f12fb36cdee200fdf461daf36c0d32e236201582317b0",
+      "historical": "45ac400b54521cef53a8f623357722b8d29a1ac37ef9dadbf6887a663f9d923c"
+    },
+    "privacy": "No report text, gold labels, or private review notes included",
+    "review_provenance": "Agent-assisted conservative leakage review; independent human audit remains pending.",
+    "near_duplicate_threshold": 0.85
+  },
+  "quality": {
+    "development": {
+      "baseline": 0.46032674255368733,
+      "selected": 0.4860641298019153
+    },
+    "reserved": {
+      "baseline": 0.5224256528880364,
+      "selected": 0.5537087328405471,
+      "delta": 0.03128307995251067,
+      "per_event": {
+        "california_wildfires_2018": {
+          "n": 7376,
+          "baseline_macro_f1": 0.5349934874192573,
+          "selected_macro_f1": 0.5628165814877889,
+          "delta": 0.027823094068531562
+        },
+        "hurricane_irma_2017": {
+          "n": 9399,
+          "baseline_macro_f1": 0.5090588972040904,
+          "selected_macro_f1": 0.5441617622229338,
+          "delta": 0.03510286501884341
+        },
+        "kaikoura_earthquake_2016": {
+          "n": 2195,
+          "baseline_macro_f1": 0.5232245740407617,
+          "selected_macro_f1": 0.5541478548109185,
+          "delta": 0.030923280770156825
+        }
+      },
+      "per_class": {
+        "caution_and_advice": {
+          "baseline": {
+            "precision": 0.5565159574468085,
+            "recall": 0.672289156626506,
+            "f1": 0.6089487086213169,
+            "support": 1245
+          },
+          "selected": {
+            "precision": 0.6003197442046363,
+            "recall": 0.6032128514056225,
+            "f1": 0.6017628205128205,
+            "support": 1245
+          }
+        },
+        "displaced_people_and_evacuations": {
+          "baseline": {
+            "precision": 0.7104303428154631,
+            "recall": 0.8049586776859504,
+            "f1": 0.7547462223944208,
+            "support": 1210
+          },
+          "selected": {
+            "precision": 0.8598781549173194,
+            "recall": 0.8165289256198347,
+            "f1": 0.837643069097075,
+            "support": 1210
+          }
+        },
+        "dont_know_cant_judge": {
+          "baseline": {
+            "precision": 0.0,
+            "recall": null,
+            "f1": 0.0,
+            "support": 0
+          },
+          "selected": {
+            "precision": 0.0,
+            "recall": null,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "infrastructure_and_utility_damage": {
+          "baseline": {
+            "precision": 0.7452593917710196,
+            "recall": 0.7965583173996176,
+            "f1": 0.7700554528650647,
+            "support": 2615
+          },
+          "selected": {
+            "precision": 0.804014598540146,
+            "recall": 0.8424474187380497,
+            "f1": 0.822782446311858,
+            "support": 2615
+          }
+        },
+        "injured_or_dead_people": {
+          "baseline": {
+            "precision": 0.9165092557612391,
+            "recall": 0.8237691001697793,
+            "f1": 0.8676680972818311,
+            "support": 2945
+          },
+          "selected": {
+            "precision": 0.895180316818335,
+            "recall": 0.901867572156197,
+            "f1": 0.8985115020297699,
+            "support": 2945
+          }
+        },
+        "missing_or_found_people": {
+          "baseline": {
+            "precision": 0.5053763440860215,
+            "recall": 0.5251396648044693,
+            "f1": 0.5150684931506849,
+            "support": 179
+          },
+          "selected": {
+            "precision": 0.8271604938271605,
+            "recall": 0.3743016759776536,
+            "f1": 0.5153846153846153,
+            "support": 179
+          }
+        },
+        "not_humanitarian": {
+          "baseline": {
+            "precision": 0.448832516575382,
+            "recall": 0.721835883171071,
+            "f1": 0.5535015997156061,
+            "support": 2157
+          },
+          "selected": {
+            "precision": 0.5100196463654224,
+            "recall": 0.6017617060732499,
+            "f1": 0.5521054870267971,
+            "support": 2157
+          }
+        },
+        "other_relevant_information": {
+          "baseline": {
+            "precision": 0.5326226012793177,
+            "recall": 0.3369301321823577,
+            "f1": 0.4127561136814276,
+            "support": 3707
+          },
+          "selected": {
+            "precision": 0.5300993571011104,
+            "recall": 0.48934448340976533,
+            "f1": 0.5089072801234394,
+            "support": 3707
+          }
+        },
+        "requests_or_urgent_needs": {
+          "baseline": {
+            "precision": 0.20333839150227617,
+            "recall": 0.5851528384279476,
+            "f1": 0.30180180180180183,
+            "support": 229
+          },
+          "selected": {
+            "precision": 0.26929392446633826,
+            "recall": 0.7161572052401747,
+            "f1": 0.3914081145584726,
+            "support": 229
+          }
+        },
+        "rescue_volunteering_or_donation_effort": {
+          "baseline": {
+            "precision": 0.7897301349325337,
+            "recall": 0.6559775840597758,
+            "f1": 0.7166666666666667,
+            "support": 3212
+          },
+          "selected": {
+            "precision": 0.7838776928422516,
+            "recall": 0.7023661270236613,
+            "f1": 0.7408866995073892,
+            "support": 3212
+          }
+        },
+        "sympathy_and_support": {
+          "baseline": {
+            "precision": 0.7677224736048266,
+            "recall": 0.6920462270564242,
+            "f1": 0.7279227744011441,
+            "support": 1471
+          },
+          "selected": {
+            "precision": 0.7929216867469879,
+            "recall": 0.7158395649218219,
+            "f1": 0.752411575562701,
+            "support": 1471
+          }
+        }
+      },
+      "event_bootstrap_delta_95_percent": [
+        0.027823094068531562,
+        0.03510286501884341
+      ],
+      "uncertainty_method": "Paired event resampling, 2000 draws, seed 42; few events, descriptive only"
+    }
+  },
+  "baseline_configuration": {
+    "C": 1.0,
+    "class_weight": "balanced",
+    "seed": 42,
+    "threads": 2,
+    "kind": "minilm",
+    "max_iter": 2000,
+    "tfidf_max_features": null,
+    "tfidf_ngram_range": null,
+    "embedding_max_tokens": 128,
+    "embedding_batch_size": 64
+  },
+  "selected_configuration": {
+    "C": 1.0,
+    "class_weight": "balanced",
+    "seed": 42,
+    "threads": 2,
+    "kind": "tfidf",
+    "max_iter": 2000,
+    "tfidf_max_features": 50000,
+    "tfidf_ngram_range": [
+      1,
+      2
+    ],
+    "embedding_max_tokens": null,
+    "embedding_batch_size": null
+  },
+  "baseline_timing": {
+    "seconds": 160.49794739999925,
+    "peak_rss_bytes": 944816128,
+    "memory_method": "sampled process RSS, excludes children",
+    "memory_unavailable_reason": null,
+    "cache_hit": false,
+    "cache_mode": "cold",
+    "model_load_seconds": 9.730711899999733,
+    "embedding_seconds": 150.45685400000002,
+    "prediction_seconds": 0.014930299999832641,
+    "inference_seconds": 150.76723549999952,
+    "total_processing_seconds": 165.43600900000092,
+    "total_processing_definition": "validation/model/data loading through predictions; excludes report export",
+    "reports_per_second": 118.19465798352066
+  },
+  "selected_timing": {
+    "seconds": 2.829930099998819,
+    "peak_rss_bytes": 313815040,
+    "memory_method": "sampled process RSS, excludes children",
+    "memory_unavailable_reason": null,
+    "embedding_seconds": null,
+    "model_load_seconds": null,
+    "reason": "TF-IDF has no embedding stage",
+    "prediction_seconds": 0.03966509999918344,
+    "inference_seconds": 2.829930099998819,
+    "total_processing_seconds": 35.207728999999745,
+    "total_processing_definition": "validation/model/data loading through predictions; excludes report export",
+    "reports_per_second": 6703.3457822890805
+  },
+  "same_hardware": true,
+  "same_runtime_environment": true,
+  "profile": {
+    "status": "complete",
+    "rows": [
+      {
+        "batch_size": 16,
+        "repeat": 0,
+        "n": 512,
+        "cache_hit": false,
+        "cache_mode": "cold",
+        "model_load_seconds": 14.218225699998584,
+        "embedding_seconds": 3.9497597999998106,
+        "seconds": 18.325753900000564,
+        "peak_rss_bytes": 722305024,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 0.0,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 27.938823297195118
+      },
+      {
+        "batch_size": 16,
+        "repeat": 0,
+        "n": 512,
+        "cache_hit": true,
+        "cache_mode": "warm",
+        "model_load_seconds": 0.0,
+        "embedding_seconds": 0.02124270000058459,
+        "seconds": 0.11478619999979855,
+        "peak_rss_bytes": 628162560,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 0.0,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 4460.466502078634
+      },
+      {
+        "batch_size": 16,
+        "repeat": 1,
+        "n": 512,
+        "cache_hit": false,
+        "cache_mode": "cold",
+        "model_load_seconds": 0.13843459999952756,
+        "embedding_seconds": 3.880969300000288,
+        "seconds": 4.153571299999385,
+        "peak_rss_bytes": 732192768,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 0.0,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 123.26741568155477
+      },
+      {
+        "batch_size": 16,
+        "repeat": 1,
+        "n": 512,
+        "cache_hit": true,
+        "cache_mode": "warm",
+        "model_load_seconds": 0.0,
+        "embedding_seconds": 0.0049816999999166,
+        "seconds": 0.09815230000094743,
+        "peak_rss_bytes": 632201216,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 0.0,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 5216.383110686737
+      },
+      {
+        "batch_size": 32,
+        "repeat": 0,
+        "n": 512,
+        "cache_hit": false,
+        "cache_mode": "cold",
+        "model_load_seconds": 0.1309040999985882,
+        "embedding_seconds": 4.431026100000963,
+        "seconds": 4.6881198000010045,
+        "peak_rss_bytes": 767623168,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 9.313225746154785e-08,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 109.21222618924762
+      },
+      {
+        "batch_size": 32,
+        "repeat": 0,
+        "n": 512,
+        "cache_hit": true,
+        "cache_mode": "warm",
+        "model_load_seconds": 0.0,
+        "embedding_seconds": 0.024418999999397784,
+        "seconds": 0.11957970000003115,
+        "peak_rss_bytes": 657883136,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 9.313225746154785e-08,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 4281.66319199552
+      },
+      {
+        "batch_size": 32,
+        "repeat": 1,
+        "n": 512,
+        "cache_hit": false,
+        "cache_mode": "cold",
+        "model_load_seconds": 0.1348256000001129,
+        "embedding_seconds": 4.454486700000416,
+        "seconds": 4.737531699998726,
+        "peak_rss_bytes": 768782336,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 9.313225746154785e-08,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 108.07315547886205
+      },
+      {
+        "batch_size": 32,
+        "repeat": 1,
+        "n": 512,
+        "cache_hit": true,
+        "cache_mode": "warm",
+        "model_load_seconds": 0.0,
+        "embedding_seconds": 0.002425600001515704,
+        "seconds": 0.0924667999988742,
+        "peak_rss_bytes": 658649088,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 9.313225746154785e-08,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 5537.122513228896
+      },
+      {
+        "batch_size": 64,
+        "repeat": 0,
+        "n": 512,
+        "cache_hit": false,
+        "cache_mode": "cold",
+        "model_load_seconds": 0.12846109999918554,
+        "embedding_seconds": 4.437950099998488,
+        "seconds": 4.692176499998823,
+        "peak_rss_bytes": 833732608,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 9.685754776000977e-08,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 109.11780492488475
+      },
+      {
+        "batch_size": 64,
+        "repeat": 0,
+        "n": 512,
+        "cache_hit": true,
+        "cache_mode": "warm",
+        "model_load_seconds": 0.0,
+        "embedding_seconds": 0.017356300000756164,
+        "seconds": 0.11120940000000701,
+        "peak_rss_bytes": 712736768,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 9.685754776000977e-08,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 4603.927365851877
+      },
+      {
+        "batch_size": 64,
+        "repeat": 1,
+        "n": 512,
+        "cache_hit": false,
+        "cache_mode": "cold",
+        "model_load_seconds": 0.13247489999957907,
+        "embedding_seconds": 4.402847999999722,
+        "seconds": 4.649517500000002,
+        "peak_rss_bytes": 837021696,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 9.685754776000977e-08,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 110.11895320320868
+      },
+      {
+        "batch_size": 64,
+        "repeat": 1,
+        "n": 512,
+        "cache_hit": true,
+        "cache_mode": "warm",
+        "model_load_seconds": 0.0,
+        "embedding_seconds": 0.002479200000379933,
+        "seconds": 0.09133550000115065,
+        "peak_rss_bytes": 713830400,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null,
+        "max_abs_diff": 9.685754776000977e-08,
+        "min_cosine": 0.9999996423721313,
+        "reports_per_second": 5605.706433900836
+      }
+    ],
+    "baseline": {
+      "status": "complete",
+      "commit": "6d20725",
+      "source_sha256": "c095fe310fc6f8f80b77b9851d97368f9a7b020074410048ff34f1aba361ab64",
+      "batch_size": 64,
+      "model_load": {
+        "seconds": 0.13950569999906293,
+        "peak_rss_bytes": 814866432,
+        "memory_method": "sampled process RSS, excludes children",
+        "memory_unavailable_reason": null
+      },
+      "rows": [
+        {
+          "repeat": 0,
+          "seconds": 4.396234499999991,
+          "peak_rss_bytes": 836956160,
+          "memory_method": "sampled process RSS, excludes children",
+          "memory_unavailable_reason": null,
+          "n": 512,
+          "max_abs_diff": 9.685754776000977e-08,
+          "min_cosine": 0.9999996423721313
+        },
+        {
+          "repeat": 1,
+          "seconds": 4.432093100000202,
+          "peak_rss_bytes": 839426048,
+          "memory_method": "sampled process RSS, excludes children",
+          "memory_unavailable_reason": null,
+          "n": 512,
+          "max_abs_diff": 9.685754776000977e-08,
+          "min_cosine": 0.9999996423721313
+        }
+      ],
+      "comparison": "Baseline encode seconds versus current embedding_seconds; current shared foundation/config used with identical recorded settings"
+    },
+    "manifest_fingerprint": "a5a6d7c670f5da6f8c42fb5e3d0c930bc37613becdca4e538413f7594095a1c6",
+    "limitation": "Application-cache cold; OS caches not cleared. RSS sampled in one process."
+  },
+  "reviews": {
+    "classification": {
+      "sampled": 50,
+      "reviewed": 50,
+      "review_kinds": {
+        "agent_assisted": 50
+      },
+      "outcomes": {
+        "incorrect": 45,
+        "uncertain": 5
+      },
+      "prioritized_errors": [
+        {
+          "category": "overlapping_classes",
+          "count": 18
+        },
+        {
+          "category": "off_topic_lexical",
+          "count": 10
+        },
+        {
+          "category": "short_text",
+          "count": 5
+        },
+        {
+          "category": "hypothetical_request",
+          "count": 5
+        },
+        {
+          "category": "label_disagreement",
+          "count": 5
+        },
+        {
+          "category": "ambiguous_context",
+          "count": 3
+        },
+        {
+          "category": "historical_context",
+          "count": 2
+        },
+        {
+          "category": "indirect_request",
+          "count": 2
+        }
+      ],
+      "agreement": {
+        "status": "unavailable",
+        "reason": "Solo review is not inter-rater agreement"
+      },
+      "limitation": "Internal development review, not expert emergency-response validation"
+    },
+    "location": {
+      "sampled": 50,
+      "reviewed": 50,
+      "review_kinds": {
+        "agent_assisted": 50
+      },
+      "outcomes": {
+        "correct": 37,
+        "uncertain": 5,
+        "incorrect": 8
+      },
+      "prioritized_errors": [
+        {
+          "category": "common_word",
+          "count": 5
+        },
+        {
+          "category": "out_of_region",
+          "count": 2
+        },
+        {
+          "category": "gazetteer_coverage",
+          "count": 2
+        },
+        {
+          "category": "ambiguous_context",
+          "count": 1
+        },
+        {
+          "category": "generic_state_city",
+          "count": 1
+        },
+        {
+          "category": "personal_name",
+          "count": 1
+        },
+        {
+          "category": "storm_place_ambiguity",
+          "count": 1
+        }
+      ],
+      "agreement": {
+        "status": "unavailable",
+        "reason": "Solo review is not inter-rater agreement"
+      },
+      "limitation": "Internal development review, not expert emergency-response validation"
+    }
+  },
+  "location_changes": {
+    "sampled": 50,
+    "changed": 8,
+    "changed_previously_flagged": 8,
+    "limitation": "Agent-assisted development audit; not independent county ground truth or a generalization estimate"
+  },
+  "experiment_history": [
+    {
+      "C": 0.1,
+      "class_weight": null,
+      "status": "complete",
+      "reason": null,
+      "mean_event_macro_f1": 0.30834170487739027,
+      "assistance_recall": {
+        "requests_or_urgent_needs": 0.05555555555555555,
+        "missing_or_found_people": 0.0
+      }
+    },
+    {
+      "C": 0.1,
+      "class_weight": "balanced",
+      "status": "complete",
+      "reason": null,
+      "mean_event_macro_f1": 0.46901175128513195,
+      "assistance_recall": {
+        "requests_or_urgent_needs": 0.6666666666666666,
+        "missing_or_found_people": 0.7071428571428572
+      }
+    },
+    {
+      "C": 1.0,
+      "class_weight": null,
+      "status": "complete",
+      "reason": null,
+      "mean_event_macro_f1": 0.4168426658045852,
+      "assistance_recall": {
+        "requests_or_urgent_needs": 0.2222222222222222,
+        "missing_or_found_people": 0.0
+      }
+    },
+    {
+      "C": 1.0,
+      "class_weight": "balanced",
+      "status": "complete",
+      "reason": null,
+      "mean_event_macro_f1": 0.4860641298019153,
+      "assistance_recall": {
+        "requests_or_urgent_needs": 0.6296296296296297,
+        "missing_or_found_people": 0.5785714285714286
+      }
+    },
+    {
+      "C": 10.0,
+      "class_weight": null,
+      "status": "complete",
+      "reason": null,
+      "mean_event_macro_f1": 0.4412067348969041,
+      "assistance_recall": {
+        "requests_or_urgent_needs": 0.3148148148148148,
+        "missing_or_found_people": 0.12857142857142856
+      }
+    },
+    {
+      "C": 10.0,
+      "class_weight": "balanced",
+      "status": "complete",
+      "reason": null,
+      "mean_event_macro_f1": 0.4761794686454432,
+      "assistance_recall": {
+        "requests_or_urgent_needs": 0.4444444444444444,
+        "missing_or_found_people": 0.4714285714285714
+      }
+    }
+  ],
+  "provenance": {
+    "baseline": {
+      "commit": "6d20725f4e6dede284ab7508f517541f7939ba32",
+      "branch": "surgedesk-month-improvements",
+      "seed": 42,
+      "threads": 2,
+      "source_files": {
+        "__init__.py": "b57ff4d77dea7a00761b77e8ab4386dfae8b66131a9b95b551138742456bee9c",
+        "artifacts.py": "449d294049e95db060296d5b2f0991b400f9f3d9beca19d88f97363c479158df",
+        "baselines.py": "7d9764500aebe08f08cb43542019b41e05e62840547db88b74b6c903cd5ff7b7",
+        "benchmark.py": "47bf36437ba51377fef84912781684369206a91ccad1285fd083e0a838284733",
+        "brief.py": "e965ea3000a3ac6f20696ed4fc439447c251231a95799a59ec8f0f4cd4fd098b",
+        "config.py": "3209da295f364b59e2730498040ead450141ea44c8d0c46296b467bdbd4c7a7a",
+        "contracts.py": "9d95694057967c2da253413cc898430fc9666fd2c88e6236020710b54d004bf2",
+        "data_humaid.py": "78c97a5d8133cac3e633ea0e60935a5147e4ec719c7da4de1c612ce156913c2a",
+        "embed.py": "aeafd75d795fc4a166acee2a0371acc624143cb0ccbd03238d35045bbaff4fec",
+        "envcheck.py": "9f871f92c3de305ec49f53e147c141e54e0015c81d8b15403986cad89966ee18",
+        "evaluate.py": "8949364bef7edf1c8631975574768528b96202ad22b0c1ebebdf0b32e911c5e1",
+        "fairness.py": "cfb191d2ec40691bc440e224122ee86ee349260be9781d3270483b67c9c6f1a5",
+        "features.py": "94667231b7a1859d6d3dd23b7c4560f15b6aab2a8fb9f3ece6c0153b0df3c0e6",
+        "fileio.py": "a343bc7a836294e3c79fd2998014f645a2b06b664ad4b9a1fa03e51b627cf5a7",
+        "geo.py": "cc4d85f7d1a42989723d1e898ce28f195fa38fd40aa830cfaab3c79fc50ba7bd",
+        "grounding.py": "7679868ab931d9b8ddd170f85e59cea34dee8814192c8c71e440cd8c266135f4",
+        "group.py": "507b6f815e55db2120609cd8cefc09e982dfd72dc58621cc73480a0f8442cd50",
+        "llm.py": "439eb57d57203f1ce81649bceb569e39140d6abb32707b5744e085b46ed23104",
+        "pipeline.py": "6a7823fa7fb09b65f0f52fe1d760bbfd773c54f13fbae64c56a9fe699d83afdd",
+        "pipeline_state.py": "1d65171cb767f169a6d1105d0e0a0a177d614e0a33d61e031327e97bd241bc75",
+        "provenance.py": "034fc4358347bb5ed1ecf19cf72057e98e0fe650b2cf6a8810f92d31d7e1261a",
+        "rank.py": "ed8db4b041066352b00b71e02b2b7b7180087d87a9b3d9ce52c6ec52f68a8163",
+        "replay.py": "ce8c11fbf1b8463440959661d18cbd9599c218255638ae9d162c5197462c1438",
+        "research.py": "27be31b948f5b78f739171c2c564b18ec20df82b1c6595d5a2de75b5d5251c60",
+        "research_data.py": "9e41c6ae79d3e04f4cb186d37fada2448a3ecad8d51700973e3e80350bf1a4cc",
+        "research_demo.py": "891460a99cf004e76cfdd907943594bf58b3eab2661a9a75a79061bac1d1973e",
+        "research_notebooks.py": "b011ac7364f24b6b86c11ddd3872269b67182f4ba99f44550e89dfc6b8a2b1d5",
+        "research_profile.py": "667a180d841f871366343cccf6283f0dd8581572e0fcbf097d746ec2dafd2e07",
+        "research_report.py": "8a1af79b51284eb50a1db00efca22f3bc8a6cf4f9d21a1914de59ffcbbcfa085",
+        "research_review.py": "6ee6683fd9a9f65f69e21f5d9f0470470f25afe7b090cb34f48a5f6e793b1108",
+        "research_sweep.py": "d7eecf3afca7e2abb723e73ffc92b999296b930fc4c001506ff183fdd255206b",
+        "research_walkthrough.py": "d349e617160f029ee5d70b43067323767b01bbdd100176c14b4ba630ad2c0277",
+        "selftest.py": "d848dc900e7549e4b2fd08757f412e7dc576987ba71b45daecc33fa7373e7715",
+        "stubs.py": "93d3f10ebab326be5142f9024750ebf5fe2760cc3d0b3cb7b0eb0d44d6e1882e",
+        "tag.py": "7a781c4341bbd00c511d793926e28f3060e817cf4c11074b8d29610a4f471ff1",
+        "testing.py": "c208b343e8c11b91014e9e1c90e55fe6effa08daf3072d2439639d4e11401de0",
+        "textutil.py": "62af5e711de037b25efdb478af746249952bbb0c7c8805d651c9424615cebe40",
+        "ui.py": "522e6590b5b9474cc3f35c5eee67f59a45623feb9008f20d96a17599bc41d3b2"
+      },
+      "hardware": {
+        "arch": "AMD64",
+        "byteorder": "little",
+        "python": "3.14.0",
+        "cores": 16,
+        "physical_cores": 10,
+        "ram_gb": 15.710437774658203,
+        "nnpa_flag": null,
+        "threads_setting": 2
+      },
+      "packages": {
+        "numpy": "2.3.5",
+        "pandas": "2.3.3",
+        "scikit-learn": "1.9.1",
+        "xgboost": "3.4.1",
+        "torch": "2.11.0",
+        "transformers": "5.19.0",
+        "tokenizers": "0.23.3",
+        "huggingface_hub": "2.4.0",
+        "llama_cpp_python": null,
+        "ipywidgets": "8.1.9",
+        "matplotlib": "3.10.7",
+        "joblib": "1.5.3",
+        "torch_nnpa": null,
+        "nbconvert": "7.17.2",
+        "psutil": "7.2.2"
+      }
+    },
+    "selected": {
+      "commit": "6d20725f4e6dede284ab7508f517541f7939ba32",
+      "branch": "surgedesk-month-improvements",
+      "seed": 42,
+      "threads": 2,
+      "source_files": {
+        "__init__.py": "b57ff4d77dea7a00761b77e8ab4386dfae8b66131a9b95b551138742456bee9c",
+        "artifacts.py": "449d294049e95db060296d5b2f0991b400f9f3d9beca19d88f97363c479158df",
+        "baselines.py": "7d9764500aebe08f08cb43542019b41e05e62840547db88b74b6c903cd5ff7b7",
+        "benchmark.py": "47bf36437ba51377fef84912781684369206a91ccad1285fd083e0a838284733",
+        "brief.py": "e965ea3000a3ac6f20696ed4fc439447c251231a95799a59ec8f0f4cd4fd098b",
+        "config.py": "3209da295f364b59e2730498040ead450141ea44c8d0c46296b467bdbd4c7a7a",
+        "contracts.py": "9d95694057967c2da253413cc898430fc9666fd2c88e6236020710b54d004bf2",
+        "data_humaid.py": "78c97a5d8133cac3e633ea0e60935a5147e4ec719c7da4de1c612ce156913c2a",
+        "embed.py": "aeafd75d795fc4a166acee2a0371acc624143cb0ccbd03238d35045bbaff4fec",
+        "envcheck.py": "9f871f92c3de305ec49f53e147c141e54e0015c81d8b15403986cad89966ee18",
+        "evaluate.py": "8949364bef7edf1c8631975574768528b96202ad22b0c1ebebdf0b32e911c5e1",
+        "fairness.py": "cfb191d2ec40691bc440e224122ee86ee349260be9781d3270483b67c9c6f1a5",
+        "features.py": "94667231b7a1859d6d3dd23b7c4560f15b6aab2a8fb9f3ece6c0153b0df3c0e6",
+        "fileio.py": "a343bc7a836294e3c79fd2998014f645a2b06b664ad4b9a1fa03e51b627cf5a7",
+        "geo.py": "cc4d85f7d1a42989723d1e898ce28f195fa38fd40aa830cfaab3c79fc50ba7bd",
+        "grounding.py": "7679868ab931d9b8ddd170f85e59cea34dee8814192c8c71e440cd8c266135f4",
+        "group.py": "507b6f815e55db2120609cd8cefc09e982dfd72dc58621cc73480a0f8442cd50",
+        "llm.py": "439eb57d57203f1ce81649bceb569e39140d6abb32707b5744e085b46ed23104",
+        "pipeline.py": "6a7823fa7fb09b65f0f52fe1d760bbfd773c54f13fbae64c56a9fe699d83afdd",
+        "pipeline_state.py": "1d65171cb767f169a6d1105d0e0a0a177d614e0a33d61e031327e97bd241bc75",
+        "provenance.py": "034fc4358347bb5ed1ecf19cf72057e98e0fe650b2cf6a8810f92d31d7e1261a",
+        "rank.py": "ed8db4b041066352b00b71e02b2b7b7180087d87a9b3d9ce52c6ec52f68a8163",
+        "replay.py": "ce8c11fbf1b8463440959661d18cbd9599c218255638ae9d162c5197462c1438",
+        "research.py": "27be31b948f5b78f739171c2c564b18ec20df82b1c6595d5a2de75b5d5251c60",
+        "research_data.py": "9e41c6ae79d3e04f4cb186d37fada2448a3ecad8d51700973e3e80350bf1a4cc",
+        "research_demo.py": "891460a99cf004e76cfdd907943594bf58b3eab2661a9a75a79061bac1d1973e",
+        "research_notebooks.py": "b011ac7364f24b6b86c11ddd3872269b67182f4ba99f44550e89dfc6b8a2b1d5",
+        "research_profile.py": "667a180d841f871366343cccf6283f0dd8581572e0fcbf097d746ec2dafd2e07",
+        "research_report.py": "8a1af79b51284eb50a1db00efca22f3bc8a6cf4f9d21a1914de59ffcbbcfa085",
+        "research_review.py": "6ee6683fd9a9f65f69e21f5d9f0470470f25afe7b090cb34f48a5f6e793b1108",
+        "research_sweep.py": "d7eecf3afca7e2abb723e73ffc92b999296b930fc4c001506ff183fdd255206b",
+        "research_walkthrough.py": "d349e617160f029ee5d70b43067323767b01bbdd100176c14b4ba630ad2c0277",
+        "selftest.py": "d848dc900e7549e4b2fd08757f412e7dc576987ba71b45daecc33fa7373e7715",
+        "stubs.py": "93d3f10ebab326be5142f9024750ebf5fe2760cc3d0b3cb7b0eb0d44d6e1882e",
+        "tag.py": "7a781c4341bbd00c511d793926e28f3060e817cf4c11074b8d29610a4f471ff1",
+        "testing.py": "c208b343e8c11b91014e9e1c90e55fe6effa08daf3072d2439639d4e11401de0",
+        "textutil.py": "62af5e711de037b25efdb478af746249952bbb0c7c8805d651c9424615cebe40",
+        "ui.py": "522e6590b5b9474cc3f35c5eee67f59a45623feb9008f20d96a17599bc41d3b2"
+      },
+      "hardware": {
+        "arch": "AMD64",
+        "byteorder": "little",
+        "python": "3.14.0",
+        "cores": 16,
+        "physical_cores": 10,
+        "ram_gb": 15.710437774658203,
+        "nnpa_flag": null,
+        "threads_setting": 2
+      },
+      "packages": {
+        "numpy": "2.3.5",
+        "pandas": "2.3.3",
+        "scikit-learn": "1.9.1",
+        "xgboost": "3.4.1",
+        "torch": "2.11.0",
+        "transformers": "5.19.0",
+        "tokenizers": "0.23.3",
+        "huggingface_hub": "2.4.0",
+        "llama_cpp_python": null,
+        "ipywidgets": "8.1.9",
+        "matplotlib": "3.10.7",
+        "joblib": "1.5.3",
+        "torch_nnpa": null,
+        "nbconvert": "7.17.2",
+        "psutil": "7.2.2"
+      }
+    }
+  },
+  "model_checksums": {
+    "baseline": "fa4c3a213bf9f64ffdcc23d4c05efb999ea7440ca5f4793dcb1c669da9bac412",
+    "selected": "eed7f7026174c23f047028d710ce43938ce1c4d8e14fb8acb0d8f72bfa87af80"
+  }
+}

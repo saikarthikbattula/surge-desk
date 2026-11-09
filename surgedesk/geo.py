@@ -53,6 +53,7 @@ class Gazetteer:
             tables.append([{k: v.strip() for k, v in row.items()} for row in frame.to_dict("records")])
         self.places, self.counties = tables
         self._indexes = {}
+        self._candidate_indexes = {}
 
     def place_index(self, states: list[str]) -> dict[str, tuple[str, str]]:
         cache_key = tuple(states)
@@ -60,7 +61,7 @@ class Gazetteer:
             return dict(self._indexes[cache_key])
         counties = [c for c in self.counties if c["USPS"] in states]
         by_state = {st: [c for c in counties if c["USPS"] == st] for st in states}
-        index = {}
+        index, candidate_index = {}, {}
         for place in self.places:
             candidates = by_state.get(place["USPS"], [])
             if not candidates:
@@ -73,13 +74,24 @@ class Gazetteer:
             nearest = min(candidates, key=lambda c: _distance(float(place["INTPTLAT"]), float(place["INTPTLONG"]),
                                                             float(c["INTPTLAT"]), float(c["INTPTLONG"])))
             key, area = display.lower(), int(place["ALAND"])
+            candidate_index.setdefault(_name_key(display), []).append({"state": place["USPS"],
+                                  "county_fips": nearest["GEOID"].zfill(5)})
             if key not in index or area > index[key][2]:
                 index[key] = (display, nearest["GEOID"].zfill(5), area)
+        county_candidates = {}
         for county in counties:
             index[county["NAME"].lower()] = (county["NAME"], county["GEOID"].zfill(5), 0)
+            county_candidates.setdefault(_name_key(county["NAME"]), []).append(
+                {"state": county["USPS"], "county_fips": county["GEOID"].zfill(5)})
+        candidate_index.update(county_candidates)
         result = {k: (v[0], v[1]) for k, v in index.items()}
         self._indexes[cache_key] = result
+        self._candidate_indexes[cache_key] = candidate_index
         return dict(result)
+
+    def place_candidates(self, states):
+        self.place_index(states)
+        return self._candidate_indexes[tuple(states)]
 
 
 class PlaceMatcher:
@@ -145,6 +157,14 @@ class PlaceMatcher:
                                or before == ["tropical", "storm"]):
                     continue
                 state = self._following_state(tokens, original_tokens, i + n)
+                if config.LOCATION_POLICY == "conservative":
+                    if key in config.LOCATION_AMBIGUOUS_WORDS and state is None:
+                        continue
+                    if key == "simpson" and before and before[-1] == "saffir":
+                        continue
+                    if (state is None and before and before[-1] in config.LOCATION_GENERIC_CITY_ARTICLES
+                            and any(key == _STATE_NAMES.get(st, "") + " city" for st in self.states)):
+                        continue
                 if key == self._storm_name and state is None:
                     continue
                 if n == 1 and key in COMMON_WORD_PLACES:
@@ -170,6 +190,54 @@ class PlaceMatcher:
             else:
                 i += 1
         return found, counties[0] if counties else None
+
+    def match_with_evidence(self, text: str) -> dict:
+        """Separate name detection from defensible county assignment.
+
+        County names identify a county; places only suggest a nearest-centroid
+        county. Multiple county candidates and unqualified names occurring in
+        several event states remain unresolved under the conservative policy.
+        This is qualitative uncertainty, never a calibrated probability.
+        """
+        from .textutil import mask_privacy
+        places, legacy = self.match(text)
+        evidence, counties = [], set()
+        ambiguous = False
+        tokens = re.findall(r"[a-zA-Z0-9']+", text)
+        lowered = [t.lower() for t in tokens]
+        for display in places:
+            key = _name_key(display)
+            words = key.split()
+            qualifiers = []
+            for start in range(len(tokens)):
+                if lowered[start:start + len(words)] == words:
+                    qualifiers.append(self._following_state(lowered, tokens, start + len(words)))
+            explicit = {q for q in qualifiers if q is not None}
+            candidates = []
+            for state in self.states:
+                if explicit and state not in explicit:
+                    continue
+                candidates.extend(self._gazetteer.place_candidates([state]).get(key, []))
+            county_name = any(_name_key(c["NAME"]) == key and c["USPS"] in self.states for c in self._gazetteer.counties)
+            values = {c["county_fips"] for c in candidates}
+            counties.update(values)
+            unresolved = len(values) != 1
+            # A storm-name/state hashtag alone cannot establish that a report
+            # refers to the namesake town rather than the storm's regional tag.
+            if key == self._storm_name:
+                plain = _name_key(re.sub(r"#\w+", " ", text))
+                if not re.search(r"\b" + re.escape(key) + r"\b", plain):
+                    unresolved = True
+            ambiguous |= unresolved
+            evidence.append({"place": display, "candidates": candidates,
+                             "state_qualifiers": sorted(explicit),
+                             "method": "explicit_county_name" if county_name else "nearest_county_centroid",
+                             "uncertainty": "ambiguous" if unresolved else "county_name" if county_name else "approximate"})
+        county = next(iter(counties)) if len(counties) == 1 and not ambiguous else None
+        return {"places": places, "county_fips": county, "legacy_county_fips": legacy,
+                "uncertainty": "unknown" if not places else "ambiguous" if county is None else
+                "county_name" if all(e["method"] == "explicit_county_name" for e in evidence) else "approximate",
+                "evidence": evidence, "text": mask_privacy(text), "policy": config.LOCATION_POLICY}
 
 
 class SVI:
